@@ -31,11 +31,6 @@ Arquitetura:
 conda create -n beehus python=3.11
 conda activate beehus
 
-# Ou usar venv
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-
 # Clonar o repositório
 git clone https://github.com/bomyoungkim-gmail/beehus-app.git
 ```
@@ -55,11 +50,10 @@ Alterar o arquivo `.env template` para `.env` na raiz do projeto:
 mv ".env template" .env
 ```
 
-Abrir o arquivo `.env` na raiz do projeto e incluir nome do usuario e a senha:
+Abrir o arquivo `.env` na raiz do projeto e substituir nome do usuario e a senha:
 ```env
 JP_USERID=seu_usuario_jpmorgan
 JP_PASSWORD=sua_senha_jpmorgan
-CELERY_BROKER_URL=pyamqp://guest:guest@localhost//
 ```
 
 ### 4. Subir serviços
@@ -70,26 +64,32 @@ docker-compose up --build
 
 # Criar super usuario do Django
 docker-compose exec web python manage.py createsuperuser
+```
+
+### 5. Parar serviços
 
 # Para parar os containers
+
+```bash
+# Para os serviços mantendo os dados
 docker-compose down
 
-# Para parar os containers e remover os dados
+# ou Para parar os containers e remover os dados
 docker-compose down -v
 ```
 
-## 5. Tela de Administraçao dos serviços
-![Tela de Admin do RabbitMQ](./img/RabbitMQAdmin.jpg)
+## 6. Tela de Administraçao dos serviços
 ```
 # RabbitMQ
 http://localhost:15672/#/
 ```
+![Tela de Admin do RabbitMQ](./img/RabbitMQAdmin.jpg)
 
-![Tela de Admin do DJango](./img/DjangoAdmin.jpg)
 ```
 # Django
 http://localhost:8000/admin/
 ```
+![Tela de Admin do DJango](./img/DjangoAdmin.jpg)
 
 ## 🔧 Uso
 

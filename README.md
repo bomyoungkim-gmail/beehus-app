@@ -38,6 +38,7 @@ git clone https://github.com/bomyoungkim-gmail/beehus-app.git
 ### 2. Instale as dependências
 
 ```bash
+# A instalação no host é Opcional, pois vai rodar pelo Docker
 pip install -r requirements.txt
 ```
 

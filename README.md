@@ -52,6 +52,7 @@ mv ".env template" .env
 ```
 
 Abrir o arquivo `.env` na raiz do projeto e substituir nome do usuario e a senha:
+
 ```env
 JP_USERID=seu_usuario_jpmorgan
 JP_PASSWORD=sua_senha_jpmorgan
@@ -69,28 +70,46 @@ docker-compose exec web python manage.py createsuperuser
 
 ### 5. Parar serviços
 
-# Para parar os containers
-
 ```bash
 # Para os serviços mantendo os dados
 docker-compose down
 
 # ou Para parar os containers e remover os dados
 docker-compose down -v
+
+# e Para apagar todos os volumes
+docker volume prune -f
 ```
 
 ## 6. Tela de Administraçao dos serviços
-```
-# RabbitMQ
+
+```text
+# RabbitMQ (default user e pass: guest)
 http://localhost:15672/#/
 ```
+
 ![Tela de Admin do RabbitMQ](./img/RabbitMQAdmin.jpg)
 
-```
-# Django
+```text
+# Django (user e pass definido quando super usuario foi criado)
 http://localhost:8000/admin/
 ```
+
 ![Tela de Admin do DJango](./img/DjangoAdmin.jpg)
+
+```text
+# Selenium via NoVNC (default pass: secret)
+ http://localhost:7900
+```
+
+![Tela de Admin do DJango](./img/SeleniumNoVNC.jpg)
+
+```text
+# Task Result - Django (user e pass definido quando super usuario foi criado)
+http://localhost:8000/admin/django_celery_results/taskresult/
+```
+
+![Tela de Admin do DJango](./img/Execucao_task.jpg)
 
 ## 🔧 Uso
 
@@ -106,7 +125,7 @@ celery -A tasks worker --loglevel=info --pool=solo
 
 ## 📂 Estrutura do Projeto
 
-```
+```text
 beehus/
 ├── beehus_app            # Definição do aplicativo no Django
 ├── crawl_log             # Definição de tasks do aplicativo
@@ -121,7 +140,6 @@ beehus/
 ```
 
 ## 🔑 Tasks Disponíveis
-
 
 ## 📚 Dependências Principais
 
@@ -139,9 +157,9 @@ Para a lista completa, veja `requirements.txt`.
 
 Em caso de dúvidas ou erros, consulte a documentação oficial:
 
-- **Celery**: https://docs.celeryproject.io/
-- **Django**: https://docs.djangoproject.com/
-- **Selenium**: https://www.selenium.dev/documentation/
+- **Celery**: <https://docs.celeryproject.io/>
+- **Django**: <https://docs.djangoproject.com/>
+- **Selenium**: <https://www.selenium.dev/documentation/>
 
 ## 📄 Licença
 

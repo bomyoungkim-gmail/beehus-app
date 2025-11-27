@@ -13,37 +13,67 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:3-management
     ports:
       - "15672:15672"
       - "5672:5672"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  selenium:
+    image: selenium/standalone-chrome:latest
+    ports:
+      - "4444:4444"      # Selenium Grid API
+      - "7900:7900"      # NoVNC (WebUI)
+      - "5900:5900"      # VNC
+    environment:
+      - SE_NODE_MAX_SESSIONS=1
+      - SE_NODE_SESSION_TIMEOUT=300
+      - SE_VNC_NO_PASSWORD=1  # Desabilita autenticação VNC
+      - SE_SCREEN_WIDTH=1920   # Largura da tela
+      - SE_SCREEN_HEIGHT=1080  # Altura da tela
+    shm_size: 2gb        # Aumenta memória compartilhada para Chrome
+    restart: unless-stopped  # Reinicia automaticamente se cair
 
   web:
     build: .
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
-    restart: always
+    restart: unless-stopped
     volumes:
       - .:/app
     ports:
       - "8000:8000"
+    environment:
+      - SELENIUM_URL=http://selenium:4444
     depends_on:
       db:
         condition: service_healthy
       rabbitmq:
         condition: service_started
+      selenium:
+        condition: service_started
 
   celery:
     build: .
     command: celery -A beehus_app worker -l info
-    restart: always
+    restart: unless-stopped
     volumes:
       - .:/app
+    environment:
+      - SELENIUM_URL=http://selenium:4444
     depends_on:
       db:
         condition: service_healthy
       rabbitmq:
+        condition: service_started
+      selenium:
         condition: service_started
 
   celery-beat:
@@ -51,13 +81,17 @@ services:
     command: >
       sh -c "sleep 20 && 
       celery -A beehus_app beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler"
-    restart: always
+    restart: unless-stopped
     volumes:
       - .:/app
+    environment:
+      - SELENIUM_URL=http://selenium:4444
     depends_on:
       db:
         condition: service_healthy
       rabbitmq:
+        condition: service_started
+      selenium:
         condition: service_started
       web:
         condition: service_started

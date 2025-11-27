@@ -150,3 +150,7 @@ CELERY_BROKER_URL = 'pyamqp://guest@rabbitmq//'
 CELERY_TIMEZONE = 'America/Sao_Paulo'
 
 CELERY_RESULT_BACKEND = 'django-db'
+
+# Enable extended result metadata so django-celery-results saves
+# task name, worker hostname and args/kwargs into TaskResult
+CELERY_EXTENDED = {'result': True}

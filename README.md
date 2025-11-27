@@ -137,6 +137,9 @@ beehus/
 ├── docker-compose.yml    # Arquivos docker-compose
 ├── Dockerfile            # Arquivos Dockerfile
 ├── README.md             # Documentação do aplicativo
+├── DEV_GUIDE.md          # Documentação para desenvolvedores
+├── reload.ps1            # atualiza celery sem precisar fazer rebuild
+├── reload.sh             # atualiza celery sem precisar fazer rebuild
 ```
 
 ## 🔑 Tasks Disponíveis

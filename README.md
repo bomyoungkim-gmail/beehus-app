@@ -11,8 +11,12 @@ Este projeto automatiza fluxos de trabalho incluindo:
 - **API REST**: Endpoints RESTful com Django e Django REST Framework
 - **Agendamento**: Tasks recorrentes com django-celery-beat
 
+Arquitetura:
+![Arquitetura da aplicação](./img/Arquitetura.jpg)
+
 ## 🚀 Requisitos
 
+- **Docker Desktop** (Windows e iOS)
 - **Python 3.11+**
 - **RabbitMQ** (broker AMQP)
 - **Redis** (opcional, para cache/resultados)
@@ -31,6 +35,9 @@ conda activate beehus
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
+
+# Clonar o repositório
+git clone https://github.com/bomyoungkim-gmail/beehus-app.git
 ```
 
 ### 2. Instale as dependências
@@ -41,30 +48,52 @@ pip install -r requirements.txt
 
 ### 3. Configure as variáveis de ambiente
 
-Crie um arquivo `.env` na raiz do projeto:
+Alterar o arquivo `.env template` para `.env` na raiz do projeto:
 
+```bash
+# Renomear
+mv ".env template" .env
+```
+
+Abrir o arquivo `.env` na raiz do projeto e incluir nome do usuario e a senha:
 ```env
 JP_USERID=seu_usuario_jpmorgan
 JP_PASSWORD=sua_senha_jpmorgan
 CELERY_BROKER_URL=pyamqp://guest:guest@localhost//
 ```
 
-### 4. Inicie o RabbitMQ
+### 4. Subir serviços
 
 ```bash
-# Windows (com Chocolatey)
-choco install rabbitmq
+# Iniciar Build
+docker-compose up --build
 
-# macOS (com Homebrew)
-brew services start rabbitmq
+# Criar super usuario do Django
+docker-compose exec web python manage.py createsuperuser
 
-# Linux (Docker)
-docker run -d -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+# Para parar os containers
+docker-compose down
+
+# Para parar os containers e remover os dados
+docker-compose down -v
+```
+
+## 5. Tela de Administraçao dos serviços
+![Tela de Admin do RabbitMQ](./img/RabbitMQAdmin.jpg)
+```
+# RabbitMQ
+http://localhost:15672/#/
+```
+
+![Tela de Admin do DJango](./img/DjangoAdmin.jpg)
+```
+# Django
+http://localhost:8000/admin/
 ```
 
 ## 🔧 Uso
 
-### Iniciar o Worker Celery
+### Iniciar o Worker Celery Manual
 
 ```bash
 # Com multi-processing (padrão)
@@ -74,125 +103,24 @@ celery -A tasks worker --loglevel=info
 celery -A tasks worker --loglevel=info --pool=solo
 ```
 
-### Executar uma tarefa assíncrona
-
-```bash
-# Via Python
-python app.py
-
-# Ou dentro de Python
-from tasks import hello
-result = hello.delay('João')
-print(result.get(timeout=5))
-```
-
-### Iniciar o servidor Django
-
-```bash
-python manage.py runserver
-```
-
-### Executar migrations do Django
-
-```bash
-python manage.py migrate
-```
-
 ## 📂 Estrutura do Projeto
 
 ```
 beehus/
-├── tasks.py              # Definição de tasks Celery
-├── main.py               # Lógica de automação (Selenium/JPMorgan)
-├── app.py                # Script de teste simples
+├── beehus_app            # Definição do aplicativo no Django
+├── crawl_log             # Definição de tasks do aplicativo
 ├── manage.py             # CLI do Django
 ├── requirements.txt      # Dependências Python
 ├── .env                  # Variáveis de ambiente (não versionar)
 ├── .gitignore            # Arquivos a ignorar no Git
-├── README.md             # Este arquivo
-└── __pycache__/          # Cache Python (ignorado)
+├── .dockerignore         # Arquivos a ignorar no Docker
+├── docker-compose.yml    # Arquivos docker-compose
+├── Dockerfile            # Arquivos Dockerfile
+├── README.md             # Documentação do aplicativo
 ```
 
 ## 🔑 Tasks Disponíveis
 
-### `hello(name)`
-Uma tarefa simples de teste.
-
-**Exemplo:**
-```python
-from tasks import hello
-result = hello.delay('Mundo')
-print(result.get())  # Output: "Olá, Mundo"
-```
-
-### `login_to_jpmorgan(user, password)`
-Automação de login no portal JPMorgan Chase.
-
-**Exemplo:**
-```python
-from main import login_to_jpmorgan
-login_to_jpmorgan('seu_usuario', 'sua_senha')
-```
-
-## 🐛 Troubleshooting
-
-### Erro: `ValueError: not enough values to unpack (expected 3, got 0)`
-
-**Causa**: Instância Celery configurada incorretamente (uso de `main=` como named argument).
-
-**Solução**: Use o nome do app como primeiro argumento posicional:
-```python
-# ✗ Incorreto
-app = Celery(main='tasks', broker='...')
-
-# ✓ Correto
-app = Celery('tasks', broker='...')
-```
-
-### Erro: Conexão recusada ao RabbitMQ
-
-**Solução**: Verifique se o RabbitMQ está em execução:
-```bash
-# Verificar status (Linux/Mac)
-sudo systemctl status rabbitmq-server
-
-# Ou testar conexão
-python -c "import pika; pika.BlockingConnection(pika.ConnectionParameters('localhost'))"
-```
-
-### Worker não encontra tarefas
-
-**Solução**: Certifique-se de que o módulo é importado corretamente:
-```bash
-celery -A tasks worker --loglevel=debug
-```
-
-## 🛠️ Desenvolvimento
-
-### Adicionar nova tarefa
-
-Em `tasks.py`:
-```python
-@app.task
-def minha_tarefa(parametro):
-    resultado = processar(parametro)
-    return resultado
-```
-
-### Testar tarefa localmente (síncrono)
-
-```python
-# Sem disparar para o worker
-resultado = minha_tarefa(valor)
-```
-
-### Testar tarefa remotamente (assíncrono)
-
-```python
-# Dispara para o worker
-resultado = minha_tarefa.delay(valor)
-print(resultado.get(timeout=10))
-```
 
 ## 📚 Dependências Principais
 

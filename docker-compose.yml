@@ -1,12 +1,18 @@
 services:
   db:
-    image: postgres:13
+    image: postgres:15
     volumes:
+      # Persist PostgreSQL data - pode alterar o caminho conforme necessário
       - ./data/db:/var/lib/postgresql/data
     environment:
       - POSTGRES_DB=postgres
-      - POSTGRES_USER=beehus
-      - POSTGRES_PASSWORD=admin@123
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -23,25 +29,35 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - db
-      - rabbitmq
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
 
   celery:
     build: .
-    command: celery -A core worker -l info
+    command: celery -A beehus_app worker -l info
     restart: always
     volumes:
       - .:/app
     depends_on:
-      - db
-      - rabbitmq
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
 
   celery-beat:
     build: .
-    command: celery -A core beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    command: >
+      sh -c "sleep 20 && 
+      celery -A beehus_app beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler"
     restart: always
     volumes:
       - .:/app
     depends_on:
-      - db
-      - rabbitmq
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      web:
+        condition: service_started

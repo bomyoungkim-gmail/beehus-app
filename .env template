@@ -1,0 +1,3 @@
+# alterar o nome do arquivo para .env
+JP_USERID=nome_usuario
+JP_PASSWORD=senha_segura

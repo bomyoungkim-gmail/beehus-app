@@ -1,0 +1,46 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Django (headless mode)
+django==4.2.7
+django-celery-beat==2.5.0
+django-celery-results==2.5.0
+
+# Celery
+celery==5.3.4
+flower==2.0.1
+
+# Database
+motor==3.3.2
+pymongo==4.6.0
+beanie==1.23.6
+
+# Message Queue
+aio-pika==9.3.0
+amqp==5.2.0
+
+# Selenium
+selenium==4.15.2
+
+# Redis
+redis==5.0.1
+
+# Gmail API
+google-api-python-client==2.108.0
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
+
+# Crypto
+cryptography==41.0.7
+
+# Utils
+pydantic==2.5.0
+pydantic-settings==2.1.0
+httpx==0.25.2
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+bcrypt==4.0.1
+python-multipart==0.0.6
+email-validator

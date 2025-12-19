@@ -1,0 +1,168 @@
+# Beehus App - Automation & Web Scraping Platform
+# Compose Specification (https://docs.docker.com/compose/compose-file/)
+
+name: beehus-app
+
+services:
+
+
+  mongo:
+    image: mongo:6-jammy
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-adminpass}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - scrape-net
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - scrape-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - scrape-net
+
+  # --- Infrastructure ---
+
+  # Selenium Standalone (Consolidated)
+  selenium:
+    image: selenium/standalone-chrome:latest
+    restart: always
+    ports:
+      - "4444:4444"
+      - "7900:7900"
+    shm_size: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - scrape-net
+
+  # --- Application Services ---
+  
+  # API for Console/App
+  app-console:
+    build: .
+    command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    networks:
+      - scrape-net
+
+  # Celery Worker (replaces core-worker)
+  celery-worker:
+    build: .
+    command: celery -A django_config worker --loglevel=info --concurrency=4
+    restart: unless-stopped
+    volumes:
+      - .:/app
+      - ./artifacts:/app/artifacts
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      selenium:
+        condition: service_healthy
+    networks:
+      - scrape-net
+
+  # Celery Beat (scheduler)
+  celery-beat:
+    build: .
+    command: celery -A django_config beat --loglevel=info
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    networks:
+      - scrape-net
+
+  # Flower (Celery monitoring)
+  flower:
+    build: .
+    command: celery -A django_config flower --port=5555
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    depends_on:
+      - celery-worker
+    networks:
+      - scrape-net
+
+  frontend:
+    build: 
+      context: ./beehus-web
+      dockerfile: Dockerfile
+    working_dir: /app
+    command: sh -c "rm -rf node_modules/.vite && npm rebuild esbuild && npm run dev -- --host"
+    volumes:
+      - ./beehus-web:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"  # Same port inside/outside - no confusion!
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - app-console
+    networks:
+      - scrape-net
+
+
+volumes:
+  mongo_data:
+
+networks:
+  scrape-net:
+    driver: bridge

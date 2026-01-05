@@ -69,8 +69,9 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             async def log(msg):
                 logger.info(msg)
                 if run:
-                    run.logs.append(f"[{datetime.now().time()}] {msg}")
-                    await run.save()
+                    # Atomic push to logs to avoid overwriting status
+                    timestamped_msg = f"[{datetime.now().time()}] {msg}"
+                    await run.update({"$push": {"logs": timestamped_msg}})
 
             # Heartbeat loop
             async def heartbeat_loop():
@@ -78,8 +79,8 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     try:
                         await asyncio.sleep(60)
                         if run:
-                            run.updated_at = datetime.utcnow()
-                            await run.save()
+                            # Atomic update of updated_at
+                            await run.update({"$set": {"updated_at": datetime.utcnow()}})
                     except asyncio.CancelledError:
                         break
                     except Exception as e:

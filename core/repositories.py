@@ -40,8 +40,12 @@ class RunRepository:
         try:
             # Use direct MongoDB update_one for guaranteed persistence
             from pymongo import UpdateOne
+            
+            # Explicitly force string ID just in case
+            query_id = str(run_id) 
+            
             result = await Run.get_motor_collection().update_one(
-                {"_id": run_id},
+                {"_id": query_id},
                 {"$set": update_dict}
             )
             

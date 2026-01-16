@@ -1,0 +1,485 @@
+1. se quando o mouse esta hover em menu:
+<a href="javascript:;" aria-expanded="false" class="btn-nav btn-menu btn-menubg" onclick="triggerGA4Event('click', 'header:menu');" tabindex="0"><span class="ico-header ico-header-menu icon-itaufonts_menu_hamburguer"></span>menu</a>
+
+2. dentro do submenu:
+<div class="sub-mnu hide">
+	<div class="flex-display">
+		
+			<div class="col " style="height: 136px;">
+				<ul>
+				
+
+					
+					
+						
+						
+					
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class="titulo ">
+										<a onclick="GA.pushMegaMenu('contaCorrente','homeCategoria');dispararEventoTagueamento('Clique;Home;BTN:Home:ContaCorrente;false;customLink');toggleMenuGA4Event('1', 'conta corrente', 'contaCorrente','homeCategoria');" data-op="f4SkFHzkb/j2X9t6Fz3k+jWn2FF0mjefBAFEKH/VM9Q=;" href="javascript:;" tabindex="0">
+											conta corrente
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+
+					
+					
+					
+						
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class=" ">
+										<a onclick="GA.pushMegaMenu('contaCorrente','contaCorrente/verMais&gt;');dispararEventoTagueamento('Clique;Home;BTN:Home:CCVerMais;false;customLink');toggleMenuGA4Event('2', 'ver mais &gt;', 'contaCorrente','homeCategoria');" data-op="f4SkFHzkb/j2X9t6Fz3k+jWn2FF0mjefBAFEKH/VM9Q=;" href="javascript:;" tabindex="0">
+											ver mais &gt;
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+			</ul></div>
+		
+			<div class="col " style="height: 136px;">
+				<ul>
+				
+
+					
+					
+						
+						
+					
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class="titulo ">
+										<a onclick="GA.pushMegaMenu('investimentos','homeCategoria');dispararEventoTagueamento('Clique;Home;BTN:Home:Investimentos;false;customLink');toggleMenuGA4Event('1', 'investimentos', 'investimentos','homeCategoria');" data-op="ykP1LIdeZeNBofJ8J4NRQdLWe1f6bZyQHe2xDB6Fd5M=;" href="javascript:;" tabindex="0">
+											investimentos
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+
+					
+					
+					
+						
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class=" ">
+										<a onclick="GA.pushMegaMenu('investimentos','investimentos/posicaoDiaria');dispararEventoTagueamento('');toggleMenuGA4Event('2', 'posição diária', 'investimentos','homeCategoria');" data-op="s9/9M/1kJmNoPMbKz3ZOMxFLuHp/XH2SIOvAiFZSs1U=;pf-posicao-diaria-investimentos" href="javascript:;" tabindex="0">
+											posição diária
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+
+					
+					
+					
+						
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class=" ">
+										<a onclick="GA.pushMegaMenu('investimentos','investimentos/relatorioMensal');dispararEventoTagueamento('');toggleMenuGA4Event('2', 'relatório mensal', 'investimentos','homeCategoria');" data-op="t7lUahrtuIibqMXaMorYZaxXT/01rmX5Ww5t83zFG2w=;" href="javascript:;" tabindex="0">
+											relatório mensal
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+
+					
+					
+					
+						
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class=" ">
+										<a onclick="GA.pushMegaMenu('investimentos','investimentos/tabelasRentabilidade');dispararEventoTagueamento('');toggleMenuGA4Event('2', 'tabelas de rentabilidade', 'investimentos','homeCategoria');" data-op="FBz5RSeEjRohhwJkN837tfiGOpFYXFnpaHwiB8pp2xE=;" href="javascript:;" tabindex="0">
+											tabelas de rentabilidade
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+
+					
+					
+					
+						
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class=" ">
+										<a onclick="GA.pushMegaMenu('investimentos','investimentos/verMais&gt;');dispararEventoTagueamento('');toggleMenuGA4Event('2', 'ver mais &gt;', 'investimentos','homeCategoria');" data-op="ykP1LIdeZeNBofJ8J4NRQdLWe1f6bZyQHe2xDB6Fd5M=;" href="javascript:;" tabindex="0">
+											ver mais &gt;
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+			</ul></div>
+		
+			<div class="col last" style="height: 136px;">
+				<ul>
+				
+
+					
+					
+						
+						
+					
+					
+
+					
+						<li class="titulo cursor-default incluir-tabindex" tabindex="0">mais opções</li>
+					
+					
+					
+						
+							</ul>
+							<ul>
+							<div class="line-top"></div>
+						
+						
+						
+					
+				
+
+					
+					
+						
+						
+					
+					
+
+					
+					
+					
+						
+						
+							
+								
+								
+								
+									<li class=" ">
+										<a onclick="GA.pushMegaMenu('comprovantes','homeCategoria');dispararEventoTagueamento('');toggleMenuGA4Event('1', 'comprovantes', 'comprovantes','homeCategoria');" data-op="+EJTa8+5Hdi2z2/veRLqQCCburUkfCWjrlg1xDYg/eo=;" href="javascript:;" tabindex="0">
+											comprovantes
+										</a>
+										
+											
+											
+																			
+									</li>
+								
+								
+								
+								
+								
+							
+						
+						
+					
+				
+			</ul></div>
+		
+	</div>
+	
+<script type="text/javascript">
+	
+	function executaLinkExterno(urlResolver){
+		$.Ajax({
+			type : 'post',
+			async : true,
+			url : urlResolver,
+			success : function(data) {
+				var div = "<div id='lightBoxLinksExternos'></div>";
+				if (typeof $("#lightBoxLinksExternos")[0] == typeof undefined || $("#lightBoxLinksExternos")[0] == null) {
+					$(div).prependTo("body");					
+				}
+				$("#lightBoxLinksExternos").html(data);
+			}
+		});
+	}
+</script>
+
+
+
+</div>
+
+3. tiver conta corrente:
+<li class="titulo ">
+										<a onclick="GA.pushMegaMenu('contaCorrente','homeCategoria');dispararEventoTagueamento('Clique;Home;BTN:Home:ContaCorrente;false;customLink');toggleMenuGA4Event('1', 'conta corrente', 'contaCorrente','homeCategoria');" data-op="f4SkFHzkb/j2X9t6Fz3k+jWn2FF0mjefBAFEKH/VM9Q=;" href="javascript:;" tabindex="0">
+											conta corrente
+										</a>
+										
+											
+											
+																			
+									</li>
+
+4. clicar no link conta corrente
+<a data-op="f4SkFHzkb/j2X9t6Fz3k+jWn2FF0mjefBAFEKH/VM9Q=;" href="javascript:;" tabindex="0">
+											conta corrente
+										</a>
+5. quando abrir pagina nova (body.txt), clicar em extrato:
+<a onclick="GA.pushMenuCategoria('contaCorrente','saldoExtrato','contaCorrente/saldoExtrato/extrato');" data-op="uAigfBehwyWezpXfFOfSvWVKbQ+My3sVw2nH2x04PAQ=;" class="" href="javascript:;" aria-label="extrato Você está em saldo e extrato" tabindex="0">extrato</a>
+
+6. quando carregar pagina nova, alterar os campos data inicial e data final com o data calculado internamente ou fornecido pelo usuario.
+ - <input id="date-mask-custom-inicial" type="text" value="" placeholder="dd/mm/aaaa" class="date-mask-custom date-mask-custom-inicial date-from placeholder-executed" onfocus="javascript:atualizaSelecaoPeriodoCustomizado()" onkeyup="validaData()" tabindex="0">
+ - <input id="date-mask-custom-final" type="text" value="" placeholder="dd/mm/aaaa" class="date-mask-custom date-mask-custom-final date-to placeholder-executed" onfocus="javascript:atualizaSelecaoPeriodoCustomizado()" onkeyup="validaData()" tabindex="0">
+
+7. e clicar em botao filtrar
+<button class="itau-button itau-button--outline margem-esquerda10 right" id="btn-aplicar-filtros" onclick="javascript:consultarLancamentosPorPeriodo('', 'periodoDeAte')" disabled="" tabindex="0">filtrar</button>
+
+8. quando terminar a atualizacao da pagina, clicar em botao salvar como
+<button aria-label="salvar como" id="botao-opcoes-lancamentos" class="icon-itaufonts_download ni-icone-menu-exportar no-padding-esquerda" onclick="javascript:adobeBtnExtrato('BotaoSalvar', true);" text-tooltip="salvar como" class-tooltip="cor-background-605751" class-arrow-tooltip="border-top-color-605751" data-placement="top" data-placement-arrow="center" aria-expanded="false" tabindex="0">
+					</button>
+
+9. quando abrir menu:
+<ul class="ni-menu-dropdown ni-menu-dropdown-pf largura-fixa213 txt-left itau-display-regular">
+							
+								<li>
+									<a href="javascript:;" onclick="javascript:abrirExportarPDF('#botao-opcoes-lancamentos');" role="button" tabindex="0">salvar
+										em PDF</a>
+								</li>
+							
+							
+							<li>
+								<a href="javascript:;" onclick="javascript:abrirExportarExcel();" role="button" tabindex="0">salvar
+									em Excel</a>
+							</li>
+							<li>
+								<a href="javascript:;" onclick="javascript:exportarExtratoArquivo('formExportarExtrato', 'txt');" role="button" tabindex="0">salvar
+									em arquivo de texto</a>
+							</li>
+							<li>
+								<a href="javascript:;" onclick="javascript:exportarExtratoArquivo('formExportarExtrato', 'ofx');" role="button" tabindex="0">salvar
+									em OFX</a></li>
+							
+								<li>
+									<a href="javascript:;" onclick="javascript:abrirExportarOfc();" role="button" tabindex="0">salvar em OFC</a>
+								</li>
+							
+						</ul>
+
+10. clicar em salvar em Excel
+<a href="javascript:;" onclick="javascript:abrirExportarExcel();" role="button" tabindex="0">salvar
+									em Excel</a>
+
+
+11. quando abrir janela salvar em excel
+<div class="ni-lightbox-container no-padding">
+				<span id="ancoraLightbox" tabindex="-1" aria-hidden="true" style="display: none;"></span> 					
+				<h3 id="lightboxTitle" class="ni-lightbox-cabecalho itau-display-xbold inline-block txt-no-transform" tabindex="-1" role="none" style="display: none;"></h3>
+				<button type="button" class="ni-lightbox-btn-fechar no-margem padding-cima24 btn-fechar-exportar-excel padding-direita24" id="btn-fechar-lightbox" tabindex="0" onclick="fecharOnborading()">
+	            	<span class="icon-itaufonts_fechar" aria-label="Fechar"></span>
+				</button>
+					
+				<div id="corpo-lightbox" aria-live="polite" class="ni-lightbox-corpo padding-cima30 no-padding">
+					<div id="exportar-excel">
+		<div id="titulo-exportar-excel">
+			<h1 id="salvar-em-excel">salvar em Excel</h1>
+			<span id="subtitulo-salvar-em-excel">selecione quais abas do Excel deseja salvar:</span>
+		</div>
+		<div id="opcoes-de-aba">
+			<div class="form-element-group">				
+				<div class="opcao-de-aba" id="opcao-lancamentos"> 
+					<label class="form-element-group__radio-checkbox form-element-group__radio-checkbox--checkbox">
+						<input class="excel-check-input" aria-label="lançamentos e lançamentos futuros" name="check-lancamentos" type="checkbox" value="lançamentos e lançamento futuros" onclick="desabilitarBotaoSalvar()" checked="">
+						<span ng-bind-html="check-lancamentos" aria-hidden="true">lançamentos e lançamentos futuros</span>
+					</label>
+				</div>
+				<div class="opcao-de-aba" id="opcao-posicao-consolidada"> 
+					<label class="form-element-group__radio-checkbox form-element-group__radio-checkbox--checkbox">
+						<input class="excel-check-input" aria-label="posicao consolidada" name="check-posicao-consolidada" type="checkbox" value="posição consolidada" onclick="desabilitarBotaoSalvar()" checked="">
+						<span ng-bind-html="check-posicao-consolidada" aria-hidden="true">posição consolidada</span>
+					</label>
+				</div>
+				<div class="opcao-de-aba" id="opcao-limites"> 
+					<label class="form-element-group__radio-checkbox form-element-group__radio-checkbox--checkbox">
+						<input class="excel-check-input" aria-label="limites" name="check-limites" type="checkbox" value="limites" onclick="desabilitarBotaoSalvar()" checked="">
+						<span ng-bind-html="check-limites" aria-hidden="true">limites</span>
+					</label>
+				</div>
+			</div>
+		</div>
+		<div class="salvar-excel">
+			<button id="salvar-excel-botao" class="itau-button" onclick="exportarExtratoExcel()" type="button" aria-label="Salvar">
+				Salvar
+			</button>
+		</div>
+	</div>
+				</div>
+			<div>	
+		</div>
+	</div>
+
+12. verifique se todos os itens foram selecionados (selecionar todos os checkbox):
+<div class="form-element-group">				
+				<div class="opcao-de-aba" id="opcao-lancamentos"> 
+					<label class="form-element-group__radio-checkbox form-element-group__radio-checkbox--checkbox">
+						<input class="excel-check-input" aria-label="lançamentos e lançamentos futuros" name="check-lancamentos" type="checkbox" value="lançamentos e lançamento futuros" checked="">
+						<span ng-bind-html="check-lancamentos" aria-hidden="true">lançamentos e lançamentos futuros</span>
+					</label>
+				</div>
+				<div class="opcao-de-aba" id="opcao-posicao-consolidada"> 
+					<label class="form-element-group__radio-checkbox form-element-group__radio-checkbox--checkbox">
+						<input class="excel-check-input" aria-label="posicao consolidada" name="check-posicao-consolidada" type="checkbox" value="posição consolidada" onclick="desabilitarBotaoSalvar()" checked="">
+						<span ng-bind-html="check-posicao-consolidada" aria-hidden="true">posição consolidada</span>
+					</label>
+				</div>
+				<div class="opcao-de-aba" id="opcao-limites"> 
+					<label class="form-element-group__radio-checkbox form-element-group__radio-checkbox--checkbox">
+						<input class="excel-check-input" aria-label="limites" name="check-limites" type="checkbox" value="limites" onclick="desabilitarBotaoSalvar()" checked="">
+						<span ng-bind-html="check-limites" aria-hidden="true">limites</span>
+					</label>
+				</div>
+			</div>
+
+13. e clicar em botao salvar
+<button id="salvar-excel-botao" class="itau-button" onclick="exportarExtratoExcel()" type="button" aria-label="Salvar" aria-disabled="false">
+				Salvar
+			</button>

@@ -81,6 +81,16 @@ class SeleniumHelpers:
         return self.wait.until(
             EC.presence_of_element_located((by, value))
         )
+
+    def wait_for_visible(self, by, value):
+        return self.wait.until(
+            EC.visibility_of_element_located((by, value))
+        )
+
+    def wait_for_invisibility(self, by, value):
+        return self.wait.until(
+            EC.invisibility_of_element_located((by, value))
+        )
     
 
     def send_keys(self, by, value, text):

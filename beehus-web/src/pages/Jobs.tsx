@@ -544,6 +544,27 @@ export default function Jobs() {
                                                             When enabled, this date overrides the default business day.
                                                         </p>
                                                     </div>
+
+                                                    <div className="space-y-2">
+                                                        <label className="flex items-center space-x-2 text-sm text-slate-400">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={(formData.params as any).export_extrato || false}
+                                                                onChange={(e) => setFormData({
+                                                                    ...formData,
+                                                                    params: {
+                                                                        ...formData.params,
+                                                                        export_extrato: e.target.checked
+                                                                    }
+                                                                })}
+                                                                className="rounded border-white/10 bg-dark-surface"
+                                                            />
+                                                            <span>Export extrato (uses business day)</span>
+                                                        </label>
+                                                        <p className="text-xs text-slate-500">
+                                                            This uses the report date as the extrato period.
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             ) : (
                                                 <div className="space-y-3">

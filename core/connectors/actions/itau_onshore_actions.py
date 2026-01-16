@@ -48,7 +48,7 @@ class ItauOnshoreActions:
             self.sel.MORE_ACCESS_BTN[0],
             [self.sel.MORE_ACCESS_BTN[1], self.sel.MORE_ACCESS_BTN_ZOOM[1]]
         )
-        await self.log("✓ Modal aberto")
+        await self.log("OK Modal aberto")
     
     # ========== AUTENTICAÇÃO ==========
     
@@ -66,7 +66,7 @@ class ItauOnshoreActions:
         await self.log(f"Preenchendo conta: {account}")
         self.helpers.send_keys(*self.sel.ACCOUNT, account)
         
-        await self.log("✓ Agência e conta preenchidas")
+        await self.log("OK Agência e conta preenchidas")
     
     async def submit_access(self) -> None:
         """Clica no botão de acessar após preencher agência e conta."""
@@ -76,7 +76,7 @@ class ItauOnshoreActions:
         except Exception:
             await self.log("Fallback: Tentando botão alternativo...")
             self.helpers.click_element(*self.sel.ACCESS_FALLBACK)
-        await self.log("✓ Acesso enviado")
+        await self.log("OK Acesso enviado")
     
     async def select_assessores_profile(self) -> None:
         """Seleciona o perfil de Assessores."""
@@ -86,7 +86,7 @@ class ItauOnshoreActions:
         except Exception:
             await self.log("Fallback: Tentando link ASSESSORES...")
             self.helpers.click_element(*self.sel.ASSESSORES_LINK)
-        await self.log("✓ Perfil Assessores selecionado")
+        await self.log("OK Perfil Assessores selecionado")
     
     async def fill_cpf(self, cpf: str) -> None:
         """
@@ -97,13 +97,13 @@ class ItauOnshoreActions:
         """
         await self.log(f"Preenchendo CPF: {cpf[:3]}.***.***-**")
         self.helpers.send_keys(*self.sel.CPF, cpf)
-        await self.log("✓ CPF preenchido")
+        await self.log("OK CPF preenchido")
     
     async def submit_cpf(self) -> None:
         """Clica no botão de submit após preencher o CPF."""
         await self.log("Enviando CPF...")
         self.helpers.click_element(*self.sel.SUBMIT_BTN)
-        await self.log("✓ CPF enviado")
+        await self.log("OK CPF enviado")
     
     async def fill_password_keyboard(self, password: str) -> None:
         """
@@ -124,13 +124,13 @@ class ItauOnshoreActions:
             self.helpers.wait_until(lambda d: btn.is_enabled())
             btn.click()
         
-        await self.log("✓ Senha preenchida")
+        await self.log("OK Senha preenchida")
     
     async def submit_password(self) -> None:
         """Clica no botão de continuar após preencher a senha."""
         await self.log("Enviando senha...")
         self.helpers.click_element(*self.sel.SUBMIT_BTN)
-        await self.log("✓ Senha enviada")
+        await self.log("OK Senha enviada")
     
     # ========== MENU E NAVEGAÇÃO INTERNA ==========
     
@@ -138,15 +138,71 @@ class ItauOnshoreActions:
         """Abre o menu principal (hover)."""
         await self.log("Abrindo menu principal...")
         self.helpers.hover_element(*self.sel.MENU)
-        await self.log("✓ Menu aberto")
+        await self.log("OK Menu aberto")
     
     async def navigate_to_posicao_diaria(self) -> None:
         """Navega para a página de Posição Diária."""
         await self.log("Navegando para Posição Diária...")
         self.helpers.click_element(*self.sel.POSICAO_DIARIA)
 
-        await self.log("✓ Posição Diária carregada")
+        await self.log("OK Posição Diária carregada")
     
+    async def navigate_to_conta_corrente(self) -> None:
+        """Navega para a pagina de Conta Corrente."""
+        await self.log("Navegando para Conta Corrente...")
+        self.helpers.click_element(*self.sel.CONTA_CORRENTE)
+        await self.log("OK Conta Corrente carregada")
+
+    async def open_extrato(self) -> None:
+        """Abre a pagina de Extrato."""
+        await self.log("Abrindo extrato...")
+        self.helpers.click_element(*self.sel.EXTRATO)
+        await self.log("OK Extrato aberto")
+
+    async def set_extrato_date_range(self, start_date: str, end_date: str) -> None:
+        """Define data inicial e final do extrato."""
+        await self.log("Selecionando periodo personalizado...")
+        self.helpers.click_element(*self.sel.EXTRATO_PERIODO_TRIGGER)
+        option = self.helpers.wait_for_visible(*self.sel.EXTRATO_PERIODO_PERSONALIZADO)
+        self.helpers.wait_until(lambda d: option.is_enabled())
+        option.click()
+
+        await self.log(f"Definindo periodo do extrato: {start_date} - {end_date}")
+        self.helpers.clear_and_send_keys(*self.sel.EXTRATO_DATE_INICIAL, start_date)
+        self.helpers.clear_and_send_keys(*self.sel.EXTRATO_DATE_FINAL, end_date)
+        await self.log("OK Periodo do extrato definido")
+
+    async def apply_extrato_filter(self) -> None:
+        """Aplica filtro do extrato."""
+        await self.log("Aplicando filtro do extrato...")
+        btn = self.helpers.find_element(*self.sel.EXTRATO_FILTRAR)
+        self.helpers.wait_until(lambda d: btn.is_enabled())
+        btn.click()
+        self.helpers.wait_for_invisibility(*self.sel.EXTRATO_LOADING)
+        # Aguarda atualizacao da pagina/resultado
+        export_menu = self.helpers.find_element(*self.sel.EXTRATO_EXPORT_MENU)
+        self.helpers.wait_until(lambda d: export_menu.is_displayed() and export_menu.is_enabled())
+        await self.log("OK Filtro aplicado")
+
+    async def export_extrato_excel(self) -> None:
+        """Exporta extrato para Excel."""
+        await self.log("Exportando extrato para Excel...")
+        # Aguarda o loading sumir para nao interceptar o clique
+        self.helpers.wait_for_invisibility(*self.sel.EXTRATO_LOADING)
+        self.helpers.click_element(*self.sel.EXTRATO_EXPORT_MENU)
+        self.helpers.click_element(*self.sel.EXTRATO_EXPORT_EXCEL)
+
+        try:
+            checks = self.driver.find_elements(*self.sel.EXTRATO_EXCEL_CHECKBOXES)
+            for chk in checks:
+                if chk.is_displayed() and chk.is_enabled() and not chk.is_selected():
+                    chk.click()
+        except Exception:
+            pass
+
+        self.helpers.click_element(*self.sel.EXTRATO_EXCEL_SAVE)
+        await self.log("OK Exportacao do extrato iniciada")
+
     # ========== RELATÓRIOS ==========
     
     async def set_report_date(self, date_str: str) -> None:
@@ -167,7 +223,7 @@ class ItauOnshoreActions:
             date_str=date_str
         )
         
-        await self.log("✓ Data alterada")
+        await self.log("OK Data alterada")
     
     
     
@@ -184,7 +240,7 @@ class ItauOnshoreActions:
                 # Fluxo alternativo: selecionar Excel e confirmar download
                 self.helpers.click_element(*self.sel.EXCEL)
                 self.helpers.click_element(*self.sel.BAIXAR)
-        await self.log(" Exportaao iniciada")
+        await self.log("OK Exportacao iniciada")
 
     # ========== LOGOUT ==========
 

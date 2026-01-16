@@ -148,6 +148,40 @@ class ItauOnshoreConnector(BaseConnector):
                 continue
         return None
 
+
+    async def _get_report_date(self, params: Dict[str, Any], log_func) -> str:
+        """Resolve a data do relatorio a partir dos parametros."""
+        business_day = self._get_business_day()
+        if params.get("use_business_day") and params.get("business_day"):
+            parsed_date = self._parse_report_date(params.get("business_day"))
+            if parsed_date:
+                business_day = parsed_date
+            else:
+                await log_func("INFO Data informada invalida, usando dia util anterior.")
+        await log_func(f"INFO Data do relatorio: {business_day}")
+        return business_day
+
+    async def _get_extrato_period(
+        self,
+        params: Dict[str, Any],
+        business_day: str,
+        log_func,
+    ) -> Optional[tuple[str, str]]:
+        """Resolve periodo do extrato, usando business_day quando necessario."""
+        extrato_enabled = params.get("extrato") or params.get("export_extrato")
+        if not extrato_enabled:
+            return None
+
+        extrato_start = params.get("extrato_start_date") or business_day
+        extrato_end = params.get("extrato_end_date") or business_day
+        parsed_start = self._parse_report_date(extrato_start)
+        parsed_end = self._parse_report_date(extrato_end)
+        if not parsed_start or not parsed_end:
+            await log_func("INFO Data do extrato invalida, usando dia util anterior.")
+            parsed_start = business_day
+            parsed_end = business_day
+
+        return parsed_start, parsed_end
     
     def _success_result(self, run_id: Optional[str], cpf: str) -> ScrapeResult:
         """Cria resultado de sucesso."""
@@ -189,24 +223,24 @@ class ItauOnshoreConnector(BaseConnector):
         error_msg = str(e)
         if credentials:
             await log_func(
-                f"❌ Erro durante o login Itau Onshore: {error_msg}\n"
+                f"ERROR Erro durante o login Itau Onshore: {error_msg}\n"
                 f"Agencia: {credentials.agency}\n"
                 f"Conta: {credentials.account}"
             )
         else:
-            await log_func(f"❌ Erro durante o login Itau Onshore: {error_msg}")
+            await log_func(f"ERROR Erro durante o login Itau Onshore: {error_msg}")
         
         # Captura screenshot para debug
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"/app/artifacts/error_itauonshore_{timestamp}.png"
             driver.save_screenshot(screenshot_path)
-            await log_func(f"📸 Screenshot salvo em: {screenshot_path}")
+            await log_func(f"SCREEN Screenshot salvo em: {screenshot_path}")
         except Exception as ss_e:
-            await log_func(f"⚠️ Falha ao salvar screenshot: {ss_e}")
+            await log_func(f"WARN Falha ao salvar screenshot: {ss_e}")
         
         # Pausa para inspeção visual via VNC
-        await log_func("⏸️ Pausando por 120s para inspeção visual (erro)...")
+        await log_func("PAUSE Pausando por 120s para inspeção visual (erro)...")
         await asyncio.sleep(120)
         
         return self._error_result(run_id, error_msg)
@@ -235,8 +269,8 @@ class ItauOnshoreConnector(BaseConnector):
         if not credentials:
             error_msg = "Missing credentials - check username, password, agencia, and conta"
             logger.error(error_msg)
-            await log(f"❌ {error_msg}")
-            await log(f"📋 Available params: {list(params.keys())}")
+            await log(f"ERROR {error_msg}")
+            await log(f"INFO Available params: {list(params.keys())}")
             return self._error_result(run_id, error_msg)
         
         # Criar actions
@@ -263,28 +297,43 @@ class ItauOnshoreConnector(BaseConnector):
             await actions.navigate_to_posicao_diaria()
             
             # 4. Configuração e Exportação de Relatório
-            business_day = self._get_business_day()
-            if params.get("use_business_day") and params.get("business_day"):
-                parsed_date = self._parse_report_date(params.get("business_day"))
-                if parsed_date:
-                    business_day = parsed_date
-                else:
-                    await log("?? Data informada invalida, usando dia util anterior.")
-            await log(f"?? Data do relat¢rio: {business_day}")
+            business_day = await self._get_report_date(params, log)
             await actions.set_report_date(business_day)
             await actions.export_to_excel()
             
+
+            # 5. Extrato (opcional)
+            extrato_period = await self._get_extrato_period(params, business_day, log)
+            if extrato_period:
+                await log("INFO Iniciando extrato...")
+                extrato_start, extrato_end = extrato_period
+
+                await actions.open_menu()
+                await actions.navigate_to_conta_corrente()
+                await actions.open_extrato()
+                # periodo personalizado
+                await actions.set_extrato_date_range(extrato_start, extrato_end)
+                await actions.apply_extrato_filter()
+                await actions.export_extrato_excel()
+
+
             # ========== SUCESSO ==========
             
-            await log("✅ Login Success! Sleeping for 120s for visual verification...")
+            await log("OK Login success. Sleeping for 120s for visual verification...")
             await asyncio.sleep(120)
-            
+
+            # 5. Logout
+            await actions.logout()            
+
             return self._success_result(run_id, credentials.cpf)
             
         except Exception as e:
+
+            # 5. Logout
+            await actions.logout()            
+
             return await self._handle_error(e, driver, run_id, log, credentials)
 
     
-        # 5. Logout
-        await actions.logout()
+
     

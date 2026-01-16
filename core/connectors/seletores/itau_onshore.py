@@ -27,6 +27,8 @@ class SeletorItauOnshore:
     # === MENU - Navegação Principal ===
     MENU = (By.CSS_SELECTOR, "a.btn-nav.btn-menu.btn-menubg[onclick*='header:menu']")
     POSICAO_DIARIA = (By.XPATH, "//a[contains(@data-op,'pf-posicao-diaria-investimentos')]")
+    CONTA_CORRENTE = (By.XPATH, "//a[normalize-space()='conta corrente']")
+    EXTRATO = (By.XPATH, "//a[contains(@aria-label,'extrato') or normalize-space()='extrato']")
     
     # === REPORTS - Relatórios ===
     MEUS_INVESTIMENTOS_TAB = (By.XPATH,
@@ -54,6 +56,18 @@ class SeletorItauOnshore:
     EXPORT_EXCEL_BTN = (By.CSS_SELECTOR, "button[aria-label*='Excel'][type='button'], button[aria-label*='excel'][type='button']")
     EXPORT_EXCEL_BTN_ALT = (By.XPATH, "//button[@type='button' and contains(@aria-label, 'Excel')]")
     BAIXAR = (By.XPATH, "//button[contains(@class,'ids-main-button')][.//span[contains(normalize-space(),'Baixar relatório')]]")
+
+    # === EXTRATO ===
+    EXTRATO_PERIODO_TRIGGER = (By.ID, "periodoFiltro")
+    EXTRATO_PERIODO_PERSONALIZADO = (By.XPATH, "//li[@data-id='personalizado' or contains(normalize-space(), 'personalizado')]")
+    EXTRATO_DATE_INICIAL = (By.ID, "date-mask-custom-inicial")
+    EXTRATO_DATE_FINAL = (By.ID, "date-mask-custom-final")
+    EXTRATO_FILTRAR = (By.ID, "btn-aplicar-filtros")
+    EXTRATO_EXPORT_MENU = (By.ID, "botao-opcoes-lancamentos")
+    EXTRATO_EXPORT_EXCEL = (By.XPATH, "//a[contains(@onclick,'abrirExportarExcel')]")
+    EXTRATO_EXCEL_CHECKBOXES = (By.CSS_SELECTOR, "input.excel-check-input")
+    EXTRATO_EXCEL_SAVE = (By.ID, "salvar-excel-botao")
+    EXTRATO_LOADING = (By.CSS_SELECTOR, "div.loading-nova-internet[aria-label='carregando']")
     
     # === LOGOUT ===
     SAIR = (By.XPATH, "//a[contains(@class,'btn-nav')][.//span[normalize-space()='sair']]")

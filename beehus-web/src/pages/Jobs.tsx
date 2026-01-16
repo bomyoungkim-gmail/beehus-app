@@ -124,6 +124,11 @@ export default function Jobs() {
     useEffect(() => {
         if (formData.connector === 'jpmorgan_login') {
             setFormData(prev => ({ ...prev, params: { username: '', password: '' } }));
+        } else if (formData.connector === 'itau_onshore_login') {
+            setFormData(prev => ({
+                ...prev,
+                params: { username: '', password: '', use_business_day: false, business_day: '' }
+            }));
         } else if (formData.connector === 'generic_scraper') {
             setFormData(prev => ({ ...prev, params: { url: '', selector: '' } }));
         }
@@ -505,6 +510,40 @@ export default function Jobs() {
                                                             </div>
                                                         </div>
                                                     )}
+
+                                                    <div className="space-y-3">
+                                                        <label className="flex items-center space-x-2 text-sm text-slate-400">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={(formData.params as any).use_business_day || false}
+                                                                onChange={(e) => setFormData({
+                                                                    ...formData,
+                                                                    params: {
+                                                                        ...formData.params,
+                                                                        use_business_day: e.target.checked
+                                                                    }
+                                                                })}
+                                                                className="rounded border-white/10 bg-dark-surface"
+                                                            />
+                                                            <span>Use specific report date</span>
+                                                        </label>
+                                                        <input
+                                                            type="date"
+                                                            value={(formData.params as any).business_day || ''}
+                                                            onChange={(e) => setFormData({
+                                                                ...formData,
+                                                                params: {
+                                                                    ...formData.params,
+                                                                    business_day: e.target.value
+                                                                }
+                                                            })}
+                                                            disabled={!(formData.params as any).use_business_day}
+                                                            className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                                                        />
+                                                        <p className="text-xs text-slate-500">
+                                                            When enabled, this date overrides the default business day.
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             ) : (
                                                 <div className="space-y-3">
@@ -536,6 +575,7 @@ export default function Jobs() {
                                                     </div>
                                                 </div>
                                             )}
+
                                         </>
                                     )}
                                 </div>

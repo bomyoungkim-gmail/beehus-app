@@ -1,9 +1,25 @@
 import re
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 PAIR_RE = re.compile(r"(\d)\s*ou\s*(\d)")
 
 
 def build_digit_to_button_map(driver, timeout=50):
+    """
+    Mapeia dígitos (0-9) para botões do teclado digital do Itaú.
+    
+    Args:
+        driver: WebDriver instance
+        timeout: Tempo máximo de espera em segundos
+        
+    Returns:
+        dict: Mapeamento de dígito (str) para elemento WebElement
+        
+    Raises:
+        RuntimeError: Se não conseguir mapear todos os dígitos 0-9
+    """
     wait = WebDriverWait(driver, timeout)
     
     container = wait.until(

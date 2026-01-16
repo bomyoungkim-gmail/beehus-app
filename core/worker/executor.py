@@ -28,6 +28,14 @@ class SeleniumExecutor:
         chrome_options.add_argument("--window-size=1920,1080")
         # chrome_options.add_argument("--headless") # Optional, helpful for stability
 
+        prefs = {
+            "download.default_directory": "/home/seluser/Downloads",
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
         logger.info(f"🔌 Connecting to Selenium Grid at {settings.SELENIUM_REMOTE_URL}...")
         
         try:

@@ -61,6 +61,8 @@ services:
       - SE_NODE_MAX_SESSIONS=4
       - SE_NODE_OVERRIDE_MAX_SESSIONS=true
       - SE_VNC_PASSWORD=${SE_VNC_PASSWORD:-secret}
+    volumes:
+      - ${USERPROFILE}/Downloads:/home/seluser/Downloads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
       interval: 10s

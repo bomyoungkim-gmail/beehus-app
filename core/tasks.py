@@ -13,6 +13,7 @@ from core.db import init_db
 from core.security import decrypt_value
 import asyncio
 import logging
+from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 logger.info(msg)
                 if run:
                     # Atomic push to logs to avoid overwriting status
-                    timestamped_msg = f"[{datetime.now().time()}] {msg}"
+                    timestamped_msg = f"[{get_now().time()}] {msg}"
                     await run.update({"$push": {"logs": timestamped_msg}})
 
             # Heartbeat loop
@@ -84,7 +85,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                         await asyncio.sleep(60)
                         if run:
                             # Atomic update of updated_at
-                            await run.update({"$set": {"updated_at": datetime.utcnow()}})
+                            await run.update({"$set": {"updated_at": get_now()}})
                     except asyncio.CancelledError:
                         break
                     except Exception as e:
@@ -177,7 +178,7 @@ def cleanup_stale_runs(self):
         from datetime import datetime, timedelta
         
         # 1. Handle Zombie Running Jobs (No heartbeat)
-        zombie_cutoff = datetime.utcnow() - timedelta(minutes=5)
+        zombie_cutoff = get_now() - timedelta(minutes=5)
         zombies = await Run.find(
             Run.status == "running",
             Run.updated_at < zombie_cutoff
@@ -187,12 +188,12 @@ def cleanup_stale_runs(self):
             logger.warning(f"🧟 Found zombie run {run.id}. Marking failed.")
             run.status = "failed"
             run.error_summary = "Zombie execution detected (Heartbeat lost)"
-            run.logs.append(f"[{datetime.now().time()}] 💀 System: Marked as zombie (no heartbeat > 5m)")
-            run.finished_at = datetime.utcnow()
+            run.logs.append(f"[{get_now().time()}] 💀 System: Marked as zombie (no heartbeat > 5m)")
+            run.finished_at = get_now()
             await run.save()
             
         # 2. Handle Stuck Queued Jobs
-        queue_cutoff = datetime.utcnow() - timedelta(hours=1)
+        queue_cutoff = get_now() - timedelta(hours=1)
         stuck_queued = await Run.find(
             Run.status == "queued",
             Run.created_at < queue_cutoff
@@ -202,8 +203,8 @@ def cleanup_stale_runs(self):
             logger.warning(f"⏳ Found stuck queued run {run.id}. Marking failed.")
             run.status = "failed"
             run.error_summary = "Stuck in queue > 1h"
-            run.logs.append(f"[{datetime.now().time()}] 💀 System: Timeout in queue")
-            run.finished_at = datetime.utcnow()
+            run.logs.append(f"[{get_now().time()}] 💀 System: Timeout in queue")
+            run.finished_at = get_now()
             await run.save()
             
         return f"Cleaned {len(zombies)} zombies and {len(stuck_queued)} stuck runs"
@@ -224,7 +225,7 @@ def cleanup_old_runs_task(self, days_old: int = 90):
     """
     async def _cleanup():
         from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(days=days_old)
+        cutoff = get_now() - timedelta(days=days_old)
         
         # Delete old runs
         result = await Run.find(Run.created_at < cutoff).delete()

@@ -1,5 +1,19 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 import holidays
+from core.config import settings
+
+def get_now() -> datetime:
+    """
+    Returns the current datetime in the configured timezone.
+    """
+    return datetime.now(ZoneInfo(settings.TIMEZONE))
+
+def get_today() -> date:
+    """
+    Returns the current date in the configured timezone.
+    """
+    return get_now().date()
 
 def get_previous_business_day(ref_date: date = None, region: str = "BR", state: str = "SP", days: int = 1) -> date:
     """
@@ -13,7 +27,7 @@ def get_previous_business_day(ref_date: date = None, region: str = "BR", state: 
         days: Number of business days to go back (default 1).
     """
     if ref_date is None:
-        ref_date = date.today()
+        ref_date = get_today()
     
     # Select holiday calendar
     if region == "BR":

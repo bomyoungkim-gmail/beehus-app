@@ -16,7 +16,7 @@ from core.schemas.messages import ScrapeResult
 from core.connectors.helpers.selenium_helpers import SeleniumHelpers
 from core.connectors.seletores.itau_onshore import SeletorItauOnshore
 from core.connectors.actions.itau_onshore_actions import ItauOnshoreActions
-from core.utils.date_utils import get_previous_business_day
+from core.utils.date_utils import get_previous_business_day, get_now, get_today
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class ItauOnshoreConnector(BaseConnector):
         async def log(msg: str):
             logger.info(f"[Itau Onshore] {msg}")
             if run:
-                timestamped_msg = f"[{datetime.now().time()}] {msg}"
+                timestamped_msg = f"[{get_now().time()}] {msg}"
                 await run.update({"$push": {"logs": timestamped_msg}})
         return log
     
@@ -120,20 +120,26 @@ class ItauOnshoreConnector(BaseConnector):
         
         return ItauOnshoreActions(driver, helpers, selectors, log_func)
     
-    def _get_business_day(self) -> str:
+    def _get_business_day(
+        self,
+        region: str = "BR",
+        state: str = "SP",
+        days: int = 1,
+        fmt: str = "%d/%m/%Y",
+    ) -> str:
         """
         Obtém o dia útil anterior.
-        
+
         Returns:
-            Data formatada DD/MM/YYYY
+            Data formatada pelo formato informado.
         """
         previous_day = get_previous_business_day(
-            ref_date=datetime.today().date(),
-            region="BR",
-            state="SP",
-            days=1
+            ref_date=get_today(),
+            region=region,
+            state=state,
+            days=days
         )
-        return previous_day.strftime("%d/%m/%Y")
+        return previous_day.strftime(fmt)
 
     def _parse_report_date(self, date_str: str) -> Optional[str]:
         """
@@ -232,7 +238,7 @@ class ItauOnshoreConnector(BaseConnector):
         
         # Captura screenshot para debug
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = get_now().strftime("%Y%m%d_%H%M%S")
             screenshot_path = f"/app/artifacts/error_itauonshore_{timestamp}.png"
             driver.save_screenshot(screenshot_path)
             await log_func(f"SCREEN Screenshot salvo em: {screenshot_path}")

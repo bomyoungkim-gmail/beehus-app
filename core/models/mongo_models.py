@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import Field
 import uuid
+from core.utils.date_utils import get_now
 
 
 def generate_uuid():
@@ -21,7 +22,7 @@ class User(Document):
     password_hash: str
     full_name: Optional[str] = None
     role: str = "user"  # admin, user
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
     
     class Settings:
         name = "users"
@@ -31,7 +32,7 @@ class Workspace(Document):
     id: str = Field(default_factory=generate_uuid)
     name: Indexed(str, unique=True)
     description: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
     
     class Settings:
         name = "workspaces"
@@ -46,8 +47,8 @@ class InboxIntegration(Document):
     email_address: Optional[str] = None
     token_ciphertext: str  # Encrypted refresh token
     scopes: List[str] = []
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
+    updated_at: datetime = Field(default_factory=get_now)
     
     class Settings:
         name = "inbox_integrations"
@@ -63,7 +64,7 @@ class OtpRule(Document):
     otp_regex: str    # e.g. "(\\d{6})"
     ttl_seconds: int = 300
     timeout_seconds: int = 180
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
     
     class Settings:
         name = "otp_rules"
@@ -77,8 +78,8 @@ class Credential(Document):
     username: str
     encrypted_password: str
     metadata: dict = {}
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
+    updated_at: datetime = Field(default_factory=get_now)
 
     class Settings:
         name = "credentials"
@@ -94,7 +95,7 @@ class Job(Document):
     params: dict = {}  # Job-specific parameters
     schedule: Optional[str] = None  # Cron expression for periodic execution
     status: str = "active"  # active, paused, deleted
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
     
     class Settings:
         name = "jobs"
@@ -112,8 +113,8 @@ class Run(Document):
     logs: List[str] = []
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
+    updated_at: Optional[datetime] = Field(default_factory=get_now)
     
     class Settings:
         name = "runs"
@@ -129,7 +130,7 @@ class OtpAudit(Document):
     gmail_message_id: Optional[str] = None
     status: str  # found, timeout, error
     detail: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=get_now)
     
     class Settings:
         name = "otp_audit"

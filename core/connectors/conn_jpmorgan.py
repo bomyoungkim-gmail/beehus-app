@@ -130,7 +130,7 @@ class JPMorganConnector(BaseConnector):
             
             # Capture Debug Screenshot
             try:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = get_now().strftime("%Y%m%d_%H%M%S")
                 screenshot_path = f"/app/artifacts/error_jpmorgan_{timestamp}.png"
                 driver.save_screenshot(screenshot_path)
                 await log(f"📸 Screenshot salvo em: {screenshot_path}")

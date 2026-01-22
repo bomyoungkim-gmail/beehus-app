@@ -17,16 +17,21 @@ class ConnectorRegistry:
             raise ValueError(f"Connector '{name}' not found")
         return connector_cls()
 
-from core.connectors.otp_example import OtpExampleConnector
+# from core.connectors.otp_example import OtpExampleConnector
 # Register built-ins
-ConnectorRegistry.register(ExampleConnector)
-ConnectorRegistry.register(OtpExampleConnector)
+# ConnectorRegistry.register(ExampleConnector)
+# ConnectorRegistry.register(OtpExampleConnector)
 
-# Register new connectors
+# from core.connectors.generic import GenericScraperConnector
+# ConnectorRegistry.register(GenericScraperConnector)
+
+# Register connectors
 from core.connectors.conn_jpmorgan import JPMorganConnector
 from core.connectors.conn_itau_onshore import ItauOnshoreConnector
-from core.connectors.generic import GenericScraperConnector
+from core.connectors.conn_btg_offshore import BtgOffshoreConnector
+from core.connectors.conn_jefferies import JefferiesConnector
 
 ConnectorRegistry.register(JPMorganConnector)
+ConnectorRegistry.register(JefferiesConnector)
 ConnectorRegistry.register(ItauOnshoreConnector)
-ConnectorRegistry.register(GenericScraperConnector)
+ConnectorRegistry.register(BtgOffshoreConnector)

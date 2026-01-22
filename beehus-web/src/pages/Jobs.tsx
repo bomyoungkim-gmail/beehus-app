@@ -401,7 +401,7 @@ export default function Jobs() {
                                         <option value="btg_offshore_login">BTG Offshore Login</option>
                                         <option value="morgan_stanley_login">Morgan Stanley Login</option>
                                         <option value="jefferies_login">Jefferies Login</option>
-                                        <option value="generic_scraper">Generic Scraper</option>
+                                        {/* <option value="generic_scraper">Generic Scraper</option> */}
                                     </select>
                                 </div>
 

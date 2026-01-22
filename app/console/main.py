@@ -11,6 +11,7 @@ import json
 import redis.asyncio as redis
 from typing import List
 from datetime import datetime
+from core.utils.date_utils import get_now
 
 from core.db import init_db, close_db
 from core.config import settings
@@ -365,8 +366,8 @@ async def stop_run(run_id: str):
     # Update run status
     run.status = "failed"
     run.error_summary = "Cancelled by user"
-    run.logs.append(f"[{datetime.now().time()}] 🛑 Run cancelled by user")
-    run.finished_at = datetime.utcnow()
+    run.logs.append(f"[{get_now().time()}] 🛑 Run cancelled by user")
+    run.finished_at = get_now()
     await run.save()
     
     return {"message": f"Run {run_id} stopped successfully", "run_id": run_id}
@@ -425,8 +426,9 @@ async def get_dashboard_stats():
     active_jobs = await Job.find(Job.status == "active").count()
     
     # Calculate trend (last 7 days vs previous 7 days)
-    week_ago = datetime.utcnow() - timedelta(days=7)
-    two_weeks_ago = datetime.utcnow() - timedelta(days=14)
+    now = get_now()
+    week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
     
     recent_success = await Run.find(
         Run.status == "success",

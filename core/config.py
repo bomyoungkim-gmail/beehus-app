@@ -4,6 +4,7 @@ class Settings(BaseSettings):
     # MongoDB
     MONGO_URI: str
     MONGO_DB_NAME: str = "platform_db"
+    TIMEZONE: str = "America/Sao_Paulo"
     
     # RabbitMQ
     RABBITMQ_URL: str

@@ -325,6 +325,10 @@ class ItauOnshoreConnector(BaseConnector):
 
             # ========== SUCESSO ==========
             
+            # Save report date to run
+            if run:
+                await run.update({"$set": {"report_date": business_day}})
+            
             await log("OK Login success. Sleeping for 120s for visual verification...")
             await asyncio.sleep(120)
 

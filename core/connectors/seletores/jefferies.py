@@ -17,6 +17,7 @@ class SeletorJefferies:
     USER_ID = (By.ID, "userid")
     PASSWORD = (By.ID, "password")
     LOGIN_SUBMIT = (By.ID, "loginButton1")
+    OVERLAY_BACKDROP = (By.CSS_SELECTOR, "div.cdk-overlay-backdrop")
 
     # OTP
     CONTACT_METHOD = (By.CSS_SELECTOR, "mat-select[name='selectedContact']")
@@ -32,12 +33,15 @@ class SeletorJefferies:
     PRIOR_CLOSE_OPTION = (By.XPATH, "//mat-option//span[normalize-space()='Prior Close']")
     DOWNLOAD_BTN = (By.CSS_SELECTOR, "button[aria-label='Download']")
     EXPORT_EXCEL = (By.CSS_SELECTOR, "button[aria-label='Export to Excel']")
+    HOLDINGS_ROWS = (By.CSS_SELECTOR, "table tbody tr, .mat-row, .mat-mdc-row")
+    LOADING_SPINNER = (By.CSS_SELECTOR, "mat-progress-spinner, mat-spinner, .mat-progress-spinner, .mat-spinner")
 
     # History
     NAV_HISTORY = (By.ID, "nav-history")
     TIME_PERIOD = (By.ID, "timeperiod")
     PREV_BUSINESS_DAY = (By.XPATH, "//mat-option//span[normalize-space()='Previous Business Day']")
     APPLY_FILTERS = (By.XPATH, "//button[.//span[normalize-space()='Apply Filters']]")
+    HISTORY_ROWS = (By.CSS_SELECTOR, "table tbody tr, .mat-row, .mat-mdc-row")
 
     # Logout
     USER_MENU = (By.CSS_SELECTOR, "button[aria-label='Settings and Logout']")

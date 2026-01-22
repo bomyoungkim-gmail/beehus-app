@@ -8,6 +8,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import TimeoutException
 import time
 import random
 
@@ -43,10 +44,22 @@ class BtgOffshoreActions:
                 return True
         return False
 
-    def _wait_enabled(self, locator):
+    def _wait_enabled(self, locator, timeout: Optional[int] = None):
         el = self.helpers.find_element(*locator)
-        self.helpers.wait_until(lambda d: el.is_displayed() and el.is_enabled())
+        self.helpers.wait_until(lambda d: el.is_displayed() and el.is_enabled(), timeout=timeout)
         return el
+
+    def _wait_any_visible(self, locators, timeout_msg: str):
+        try:
+            return self.helpers.wait_until(
+                lambda d: any(
+                    el.is_displayed()
+                    for loc in locators
+                    for el in d.find_elements(*loc)
+                )
+            )
+        except Exception as exc:
+            raise TimeoutException(timeout_msg) from exc
 
     # ========== NAVIGATION ==========
 
@@ -100,22 +113,44 @@ class BtgOffshoreActions:
 
     # ========== OTP ==========
 
-    async def wait_for_otp(self) -> None:
+    async def request_otp(self) -> None:
+        await self.log("INFO OTP already sent, waiting for user input")
+
+    async def wait_for_otp(self, timeout_seconds: int = 240) -> None:
         self.helpers.wait_for_element(*self.sel.OTP_CODE)
         await self.log("INFO Waiting for OTP entry")
 
-        continue_btn = self._wait_enabled(self.sel.OTP_CONTINUE)
+        continue_btn = self._wait_enabled(self.sel.OTP_CONTINUE, timeout=timeout_seconds)
         continue_btn.click()
         await self.log("OK OTP continued")
 
     # ========== ACCESS ==========
 
+    async def wait_for_access_screen(self) -> None:
+        try:
+            self._wait_any_visible(
+                [self.sel.COUNTRY_US, self.sel.ACCOUNT_CHECKBOXES],
+                "Access screen not visible after OTP.",
+            )
+            await self.log("OK Access screen visible")
+        except TimeoutException:
+            await self.log("WARN Access screen not visible after OTP")
+
     async def select_country_us(self) -> None:
-        if self._is_visible(self.sel.COUNTRY_US):
+        try:
+            self.helpers.wait_for_visible(*self.sel.COUNTRY_US)
             self.helpers.click_element(*self.sel.COUNTRY_US)
             await self.log("OK Country selected: United States")
+        except TimeoutException:
+            await self.log("WARN Country tab not visible: United States")
 
     async def select_all_accounts(self) -> None:
+        try:
+            self.helpers.wait_for_element(*self.sel.ACCOUNT_CHECKBOXES)
+        except TimeoutException:
+            await self.log("WARN Account checkboxes not visible")
+            return
+
         checkboxes = self.driver.find_elements(*self.sel.ACCOUNT_CHECKBOXES)
         for chk in checkboxes:
             if chk.is_displayed() and chk.is_enabled() and not chk.is_selected():

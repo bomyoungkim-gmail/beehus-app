@@ -24,8 +24,10 @@ class RunResponse(BaseModel):
     id: str
     job_id: str
     status: RunStatus
+    report_date: Optional[str] = None
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
+    created_at: datetime
     error_summary: Optional[str]
     logs: List[str] = []
     

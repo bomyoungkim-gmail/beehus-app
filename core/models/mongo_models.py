@@ -111,6 +111,7 @@ class Run(Document):
     celery_task_id: Optional[str] = None  # For task cancellation
     error_summary: Optional[str] = None
     logs: List[str] = []
+    report_date: Optional[str] = None  # Business day used for report (DD/MM/YYYY)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=get_now)

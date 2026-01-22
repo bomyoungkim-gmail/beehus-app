@@ -108,9 +108,11 @@ class SeleniumHelpers:
         element.send_keys(text)
 
     
-    def wait_until(self, condition):
+    def wait_until(self, condition, timeout: Optional[int] = None):
         """Generic wait for custom condition."""
-        return self.wait.until(condition)
+        if timeout is None:
+            return self.wait.until(condition)
+        return WebDriverWait(self.driver, timeout).until(condition)
 
 
     def _query_shadow_dom_css(self, selector: str):

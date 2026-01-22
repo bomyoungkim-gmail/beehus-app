@@ -9,6 +9,7 @@ interface Run {
     job_id: string;
     connector: string;
     status: string;
+    report_date?: string;
     node: string;
     created_at?: string;
 }
@@ -152,6 +153,8 @@ export default function Runs() {
                     <table className="w-full text-left">
                         <thead className="bg-white/5 text-slate-400 uppercase text-xs">
                             <tr>
+                                <th className="px-6 py-4">Executed At</th>
+                                <th className="px-6 py-4">Report Date</th>
                                 <th className="px-6 py-4">Run ID</th>
                                 <th className="px-6 py-4">Connector</th>
                                 <th className="px-6 py-4">Status</th>
@@ -162,15 +165,26 @@ export default function Runs() {
                         <tbody className="divide-y divide-white/5 text-sm">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400">Loading history...</td>
+                                    <td colSpan={7} className="px-6 py-8 text-center text-slate-400">Loading history...</td>
                                 </tr>
                             ) : runs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-8 text-center text-slate-500">No execution history found.</td>
+                                    <td colSpan={7} className="px-6 py-8 text-center text-slate-500">No execution history found.</td>
                                 </tr>
                             ) : (
                                 runs.map((run) => (
                                     <tr key={run.run_id} className="hover:bg-white/5 transition-colors">
+                                        <td className="px-6 py-4 text-slate-300">
+                                            {run.created_at ? new Date(run.created_at).toLocaleString('pt-BR', {
+                                                day: '2-digit',
+                                                month: '2-digit',
+                                                year: 'numeric',
+                                                hour: '2-digit',
+                                                minute: '2-digit',
+                                                second: '2-digit'
+                                            }) : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-300">{run.report_date || '-'}</td>
                                         <td className="px-6 py-4 font-mono text-slate-300">#{run.run_id.slice(0, 8)}</td>
                                         <td className="px-6 py-4 text-white">{run.connector}</td>
                                         <td className="px-6 py-4">

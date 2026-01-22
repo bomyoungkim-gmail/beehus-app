@@ -169,9 +169,11 @@ class BtgOffshoreConnector(BaseConnector):
             await actions.click_portal_global()
             await actions.wait_for_login_form()
             await actions.fill_credentials(credentials.email, credentials.password)
-            await actions.wait_for_otp()
+            await actions.request_otp()
+            await actions.wait_for_otp(timeout_seconds=240)
 
             # 2. Acesso (United States)
+            await actions.wait_for_access_screen()
             await actions.select_country_us()
             await actions.select_all_accounts()
             await actions.submit_access()
@@ -216,6 +218,11 @@ class BtgOffshoreConnector(BaseConnector):
             await actions.click_export()
             await actions.click_download()
 
+            # Save report dates to run
+            if run:
+                report_dates_summary = f"US: {date_d1_us}, Cayman: {date_d1_ky}"
+                await run.update({"$set": {"report_date": report_dates_summary}})
+            
             await log("OK Login and exports completed. Sleeping for 120s for visual check.")
             await asyncio.sleep(120)
 

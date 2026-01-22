@@ -479,13 +479,31 @@ async def get_recent_runs(limit: int = 10):
             except Exception as e:
                 logger.warning(f"Failed to fetch job {run.job_id}: {e}")
         
+        # Convert created_at to local timezone for display
+        created_at_str = None
+        if run.created_at:
+            from zoneinfo import ZoneInfo
+            from core.config import settings
+            
+            # If datetime is naive, assume it's UTC
+            if run.created_at.tzinfo is None:
+                utc_time = run.created_at.replace(tzinfo=ZoneInfo("UTC"))
+            else:
+                utc_time = run.created_at
+            
+            # Convert to local timezone
+            local_tz = ZoneInfo(settings.TIMEZONE)
+            local_time = utc_time.astimezone(local_tz)
+            created_at_str = local_time.isoformat()
+        
         result.append({
             "run_id": str(run.id),
             "job_id": run.job_id or "N/A",
             "connector": connector_name,
             "status": run.status,
+            "report_date": run.report_date,
             "node": "selenium-node-1",  # TODO: Add node tracking
-            "created_at": run.created_at.isoformat() if run.created_at else None
+            "created_at": created_at_str
         })
     
     return result

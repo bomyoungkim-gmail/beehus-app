@@ -170,10 +170,16 @@ class JefferiesConnector(BaseConnector):
             await actions.ensure_login_dialog()
             await actions.fill_credentials(credentials.username, credentials.password)
             await actions.request_otp()
+            await actions.wait_for_otp(timeout_seconds=240)
 
             # 2. Exportacoes
             await actions.export_holdings()
             await actions.export_history()
+
+            # Save report date to run (Prior Close = D-1)
+            if run:
+                report_date = self._get_business_day(region="US", state="NY", days=1, fmt="%m/%d/%Y")
+                await run.update({"$set": {"report_date": report_date}})
 
             await log("OK Login and exports completed. Sleeping for 120s for visual check.")
             await asyncio.sleep(120)

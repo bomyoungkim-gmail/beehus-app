@@ -109,7 +109,12 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 return {"success": False, "error": str(e)}
             
             # Execute scraping with Selenium
-            executor = SeleniumExecutor()
+            # HYBRID ARCHITECTURE: 
+            # - If JP Morgan: Use Local Undetected Chrome (Port 7901)
+            # - Else, Use Remote Selenium Grid (Port 7900)
+            use_local = "jpmorgan" in connector_name.lower()
+            
+            executor = SeleniumExecutor(use_local=use_local)
             executor.start()
             await log(f"🔌 Connected to Selenium Grid: {executor.driver.session_id}")
             

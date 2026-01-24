@@ -289,13 +289,25 @@ async def trigger_run(job_id: str):
     run = Run(job_id=job.id, connector=job.connector, status="queued")
     await run.save()
     
+    # Merge job configuration into params
+    execution_params = job.params.copy()
+    execution_params.update({
+        "export_holdings": job.export_holdings,
+        "export_history": job.export_history,
+        "date_mode": job.date_mode,
+        "holdings_lag_days": job.holdings_lag_days,
+        "history_lag_days": job.history_lag_days,
+        "holdings_date": job.holdings_date,
+        "history_date": job.history_date,
+    })
+
     # 3. Dispatch to Celery (replaces HTTP call to orchestrator)
     task = scrape_task.delay(
         job_id=job.id,
         run_id=str(run.id),  # Convert to string
         workspace_id=job.workspace_id,
         connector_name=job.connector,
-        params=job.params
+        params=execution_params
     )
     
     # 4. Save task ID for cancellation support
@@ -331,13 +343,25 @@ async def retry_run(job_id: str, run_id: str):
         run.connector = job.connector
     await run.save()
     
+    # Merge job configuration into params
+    execution_params = job.params.copy()
+    execution_params.update({
+        "export_holdings": job.export_holdings,
+        "export_history": job.export_history,
+        "date_mode": job.date_mode,
+        "holdings_lag_days": job.holdings_lag_days,
+        "history_lag_days": job.history_lag_days,
+        "holdings_date": job.holdings_date,
+        "history_date": job.history_date,
+    })
+
     # Re-dispatch to Celery
     task = scrape_task.delay(
         job_id=job.id,
         run_id=run.id,
         workspace_id=job.workspace_id,
         connector_name=job.connector,
-        params=job.params
+        params=execution_params
     )
     
     # Save new task ID
@@ -502,6 +526,7 @@ async def get_recent_runs(limit: int = 10):
             "connector": connector_name,
             "status": run.status,
             "report_date": run.report_date,
+            "history_date": run.history_date,
             "node": "selenium-node-1",  # TODO: Add node tracking
             "created_at": created_at_str
         })

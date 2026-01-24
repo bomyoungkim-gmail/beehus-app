@@ -135,9 +135,6 @@ class BtgOffshoreConnector(BaseConnector):
         except Exception as ss_e:
             await log_func(f"WARN Failed to save screenshot: {ss_e}")
 
-        await log_func("PAUSE Sleeping for 120s for visual inspection (error)...")
-        await asyncio.sleep(120)
-
         return self._error_result(run_id, error_msg)
 
     # ========== METODO PRINCIPAL ==========
@@ -163,6 +160,42 @@ class BtgOffshoreConnector(BaseConnector):
 
         try:
             # ========== FLUXO PRINCIPAL ==========
+             
+            # Resolve parameters
+            export_holdings = params.get('export_holdings', True)
+            export_history = params.get('export_history', False)
+            export_holdings_cayman = params.get('export_holdings_cayman', export_holdings)
+            export_history_cayman = (
+                params.get('export_history_cayman')
+                or params.get('export_extrato_cayman')
+                or params.get('extrato_cayman')
+                or export_history
+            )
+
+            # Initial Date Calculation
+            holdings_date_us = None
+            history_date_us = None
+            holdings_date_ky = None
+            history_date_ky = None
+
+            if export_holdings:
+                 from core.connectors.utils.date_calculator import calculate_holdings_date
+                 holdings_date_us = calculate_holdings_date(params, output_format="%m/%d/%Y")  # US format
+
+            if export_history:
+                 from core.connectors.utils.date_calculator import calculate_history_date
+                 history_date_us = calculate_history_date(params, output_format="%m/%d/%Y")  # US format
+                 
+            if export_holdings_cayman:
+                 from core.connectors.utils.date_calculator import calculate_holdings_date
+                 # Reuse utility but might need specific config if cayman differs? assuming params valid
+                 holdings_date_ky = calculate_holdings_date(params, output_format="%m/%d/%Y")
+
+            if export_history_cayman:
+                from core.connectors.utils.date_calculator import calculate_history_date
+                history_date_ky = calculate_history_date(params, output_format="%m/%d/%Y")
+
+            await log(f"DEBUG Params Resolved - Holdings US: {export_holdings} ({holdings_date_us}), History US: {export_history} ({history_date_us})")
 
             # 1. Navegacao e login
             await actions.navigate_to_login(SeletorBtgOffshore.URL_BASE)
@@ -179,57 +212,65 @@ class BtgOffshoreConnector(BaseConnector):
             await actions.submit_access()
             await actions.dismiss_biometric_modal()
 
-            # 3. Exportacao US
-            date_d1_us = self._get_business_day(region="US", state="NY", days=1, fmt="%m/%d/%Y")
-            await actions.open_start_date_input()
-            await actions.select_calendar_date(date_d1_us)
-            await actions.open_check_all_anchor()
-            await actions.open_export_options()
-            await actions.select_export_all()
-            await actions.open_portfolio()
-            await actions.click_portfolio_check_all()
-            date_d2_us = self._get_business_day(region="US", state="NY", days=2, fmt="%m/%d/%Y")
-            await actions.open_filters()
-            await actions.open_time_period()
-            await actions.select_custom_period()
-            await actions.set_custom_period_dates(date_d2_us)
-            await actions.click_filter()
-            await actions.click_export()
-            await actions.click_download()
+            # 3. Export Holdings (if enabled)
+            if export_holdings and holdings_date_us:
+                await log(f"INFO Holdings date (US): {holdings_date_us}")
+                await actions.export_holdings(holdings_date_us)
+
+            # 4. Export History (if enabled)
+            if export_history and history_date_us:
+                await log(f"INFO History date (US): {history_date_us}")
+                await actions.export_history(history_date_us)
 
             # 4. Troca de custodia para Cayman
             await actions.change_custody_to_cayman()
 
-            # 5. Exportacao Cayman
-            date_d1_ky = self._get_business_day(region="KY", days=1, fmt="%m/%d/%Y")
-            await actions.open_start_date_input()
-            await actions.select_calendar_date(date_d1_ky)
-            await actions.open_check_all_anchor()
-            await actions.open_export_options()
-            await actions.select_export_all()
-            await actions.open_portfolio()
-            await actions.click_portfolio_check_all()
-            date_d2_ky = self._get_business_day(region="KY", days=2, fmt="%m/%d/%Y")
-            await actions.open_filters()
-            await actions.open_time_period()
-            await actions.select_custom_period()
-            await actions.set_custom_period_dates(date_d2_ky)
-            await actions.click_filter()
-            await actions.click_export()
-            await actions.click_download()
+            # 5. Exportacao Cayman (same pattern as US)
+            if export_holdings_cayman and holdings_date_ky:
+                await log(f"INFO Holdings date (Cayman): {holdings_date_ky}")
+                await actions.export_holdings(holdings_date_ky)
+
+            if export_history_cayman and history_date_ky:
+                await log(f"INFO History date (Cayman): {history_date_ky}")
+                await actions.export_history(history_date_ky)
 
             # Save report dates to run
             if run:
-                report_dates_summary = f"US: {date_d1_us}, Cayman: {date_d1_ky}"
-                await run.update({"$set": {"report_date": report_dates_summary}})
+                update_data = {}
+                # Capture US dates (holdings/history) if available
+                holdings_date = locals().get("holdings_date_us")
+                history_date = locals().get("history_date_us")
+                
+                if holdings_date:
+                    update_data["report_date"] = holdings_date
+                if history_date:
+                    update_data["history_date"] = history_date
+                
+                if update_data:
+                    await run.update({"$set": update_data})
             
-            await log("OK Login and exports completed. Sleeping for 120s for visual check.")
-            await asyncio.sleep(120)
+            await log("Sleeping for 10s for visual check.")
+            await asyncio.sleep(10)
 
             await actions.logout()
             return self._success_result(run_id, credentials.email)
 
         except Exception as e:
+            # Attempt to save dates if they were calculated before error
+            try:
+                if run:
+                    update_data = {}
+                    holdings_date = locals().get("holdings_date_us")
+                    history_date = locals().get("history_date_us")
+                    if holdings_date:
+                        update_data["report_date"] = holdings_date
+                    if history_date:
+                        update_data["history_date"] = history_date
+                    if update_data:
+                        await run.update({"$set": update_data})
+            except Exception:
+                pass  # Ignore db errors during error handling
+
             try:
                 await actions.logout()
             except Exception:

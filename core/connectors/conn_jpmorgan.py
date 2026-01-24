@@ -1,148 +1,225 @@
+import asyncio
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Dict, Any, Optional
+
+from selenium.webdriver.remote.webdriver import WebDriver
+
 from core.connectors.base import BaseConnector
 from core.schemas.messages import ScrapeResult
-import logging
-import time
-from typing import Dict, Any
+from core.connectors.helpers.selenium_helpers import SeleniumHelpers
+from core.connectors.seletores.jpmorgan import SeletorJPMorgan
+from core.connectors.actions.jpmorgan_actions import JPMorganActions
+from core.connectors.utils.date_calculator import calculate_history_date, calculate_holdings_date
+from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class JPMorganCredentials:
+    username: str
+    password: str
+
+
 class JPMorganConnector(BaseConnector):
     @property
-    def name(self):
+    def name(self) -> str:
         return "jpmorgan_login"
 
-    async def scrape(self, driver, params: Dict[str, Any]) -> ScrapeResult:
-        logger.info(f"Starting JPMorgan Login with params: {params}")
-        
-        run_id = params.get("run_id")
-        # Support both 'user' (from legacy) and 'username' (from new UI)
-        user = params.get("username") or params.get("user")
-        password = params.get("password")
-        
-        # Validate credentials are present
-        if not user or not password:
-            error_msg = f"Missing credentials - username: {user is not None}, password: {password is not None}"
-            logger.error(error_msg)
-            await log(f"❌ {error_msg}")
-            await log(f"📋 Available params: {list(params.keys())}")
-            return ScrapeResult(
-                run_id=run_id,
-                success=False,
-                error=error_msg
-            )
-        
-        # Import models here to avoid circular imports if any, or ensuring context
-        from core.models.mongo_models import Run
-        from core.db import init_db
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from datetime import datetime
-        import asyncio
-
-        # Helper log function (similar to tasks.py)
-        run = None
-        if run_id:
-            # Ensure DB is ready? tasks.py usually already init_db, but safe to ignore if already done
-            run = await Run.get(run_id)
-
-        async def log(msg):
+    def _make_run_logger(self, run):
+        async def log(msg: str):
             logger.info(f"[JPMorgan] {msg}")
             if run:
-                timestamped_msg = f"[{datetime.now().time()}] {msg}"
+                timestamped_msg = f"[{get_now().time()}] {msg}"
                 await run.update({"$push": {"logs": timestamped_msg}})
+        return log
 
-        _url = "https://secure.chase.com/web/auth/?treatment=jpo#/logon/logon/chaseOnline"
+    async def _setup_run(self, params: Dict[str, Any]):
+        from core.models.mongo_models import Run
+
+        run_id = params.get("run_id")
+        run = await Run.get(run_id) if run_id else None
+        log = self._make_run_logger(run)
+        return run, log
+
+    def _validate_credentials(self, params: Dict[str, Any]) -> Optional[JPMorganCredentials]:
+        username = params.get("username") or params.get("user")
+        password = params.get("password")
+        if not username or not password:
+            return None
+        return JPMorganCredentials(username=username, password=password)
+
+    def _create_actions(self, driver: WebDriver, log_func) -> JPMorganActions:
+        helpers = SeleniumHelpers(driver, timeout=50)
+        selectors = SeletorJPMorgan()
+        return JPMorganActions(driver, helpers, selectors, log_func)
+
+    def _parse_date(self, date_str: str) -> Optional[str]:
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(date_str, fmt).strftime("%m/%d/%Y")
+            except ValueError:
+                continue
+        return None
+
+    async def _get_transaction_range(self, params: Dict[str, Any], log_func) -> tuple[str, str]:
+        history_date = calculate_history_date(params, output_format="%m/%d/%Y")
+        start_date = params.get("transactions_start_date") or history_date
+        end_date = params.get("transactions_end_date") or history_date
+
+        parsed_start = self._parse_date(start_date)
+        parsed_end = self._parse_date(end_date)
+        if not parsed_start or not parsed_end:
+            await log_func("WARN Invalid transaction date range, using history date.")
+            parsed_start = history_date
+            parsed_end = history_date
+
+        await log_func(f"INFO Transaction range: {parsed_start} - {parsed_end}")
+        return parsed_start, parsed_end
+
+    def _success_result(self, run_id: Optional[str], username: str) -> ScrapeResult:
+        return ScrapeResult(
+            run_id=run_id,
+            success=True,
+            data={"message": "Export completed", "user": username},
+        )
+
+    def _error_result(self, run_id: Optional[str], error: str) -> ScrapeResult:
+        return ScrapeResult(
+            run_id=run_id,
+            success=False,
+            error=error,
+        )
+
+    async def _handle_error(
+        self,
+        e: Exception,
+        driver: WebDriver,
+        run_id: Optional[str],
+        log_func,
+        credentials: Optional[JPMorganCredentials] = None,
+    ) -> ScrapeResult:
+        error_msg = str(e)
+        if credentials:
+            await log_func(f"ERROR JPMorgan failure for user {credentials.username}: {error_msg}")
+        else:
+            await log_func(f"ERROR JPMorgan failure: {error_msg}")
 
         try:
-            # 1. Navegação
-            await log(f"NAVIGATE: {_url}")
-            driver.get(_url)
+            timestamp = get_now().strftime("%Y%m%d_%H%M%S")
+            screenshot_path = f"/app/artifacts/error_jpmorgan_{timestamp}.png"
+            driver.save_screenshot(screenshot_path)
+            await log_func(f"SCREEN Screenshot saved: {screenshot_path}")
+        except Exception as ss_e:
+            await log_func(f"WARN Screenshot failed: {ss_e}")
+
+        return self._error_result(run_id, error_msg)
+
+    async def scrape(self, driver: WebDriver, params: Dict[str, Any]) -> ScrapeResult:
+        run, log = await self._setup_run(params)
+        run_id = params.get("run_id")
+
+        logger.info(f"Starting JPMorgan flow with params: {params}")
+
+        credentials = self._validate_credentials(params)
+        if not credentials:
+            error_msg = "Missing credentials - check username and password"
+            logger.error(error_msg)
+            await log(f"ERROR {error_msg}")
+            await log(f"INFO Available params: {list(params.keys())}")
+            return self._error_result(run_id, error_msg)
+
+        # LOGIC REMOVED: Redundant Local Driver Creation
+        # The Executor (core/worker/executor.py) now handles creating the correct driver 
+        # (Local UC vs Remote Grid) based on the connector type.
+        # We simply use the `driver` passed to this method.
+
+        actions = self._create_actions(driver, log)
+
+
+        try:
+            # Resolve parameters
+            export_holdings = params.get("export_holdings", True)
+            export_history = params.get("export_history", False)
+
+            # Initial Date Calculation
+            holdings_date = None
+            history_date = None
+
+            if export_holdings:
+                 holdings_date = calculate_holdings_date(params, output_format="%m/%d/%Y")
             
-            # 2. Preenchimento de campos
-            await log("Waiting for user input field...")
-            user_id_field = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "userId-input-field-input"))
+            if export_history:
+                 history_date = calculate_history_date(params, output_format="%m/%d/%Y")
+                 start_date, end_date = await self._get_transaction_range(params, log)
+
+            await log(f"DEBUG Params Resolved - Holdings: {export_holdings} ({holdings_date}), History: {export_history} ({history_date})")
+
+            await actions.navigate_to_login(
+                retries=int(params.get("login_redirect_retries", 2))
             )
-            user_id_field.send_keys(user)
-            await log("Typed username")
-            
-            password_field = driver.find_element(By.ID, "password-input-field-input")
-            password_field.send_keys(password)
-            await log("Typed password")
+            await actions.fill_credentials(credentials.username, credentials.password)
+            await actions.submit_login()
 
-            # 3. Click Sign In
-            await log("Clicking Sign In...")
-            try:
-                sign_in_btn = driver.find_element(By.ID, "signin-button")
-                sign_in_btn.click()
+            await actions.open_mfa_dropdown()
+            await actions.select_mfa_option(params.get("mfa_option_id"))
+            await actions.request_mfa_code()
+            await actions.confirm_mfa_login()
 
-            except Exception:
-                 # Fallback to type=submit if ID changes
-                 await log("Fallback: Finding submit button...")
-                 sign_in_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-                 sign_in_btn.click()
-            
-            await log("Clicked Sign In")
-
-
-            # 4. Choose Verified Option
-            await log("Waiting for Verified Code Option...")
-            verified_option = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "simplerAuth-dropdownoptions-styledselect"))
-            )
-            verified_option.click()
-            await log("Clicked Verified Option")
-
-            # 5. Choose Text Option
-            text_option = driver.find_element(By.ID, "container-1-simplerAuth-dropdownoptions-styledselect")
-            text_option.click()
-            await log("Clicked Text Option...")
-
-            try:
-                # pass
-                # 6. Click Verify 
-                verify_btn = driver.find_element(By.ID, "requestIdentificationCode-sm")
-                verify_btn.click()
-                await log("Clicked Verify...")
-
-            except Exception:
-                 # Fallback to type=submit if ID changes
-                 await log("Fallback: Finding submit button...")
-                 verify_btn = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-                 verify_btn.click()
-            
-            await log("Clicked Verification Code Request...")
-
-
-            # Aguarda o tempo solicitado
-            await log("✅ Login Success! Sleeping for 120s for visual verification...")
-            await asyncio.sleep(120)
-
-            return ScrapeResult(
-                run_id=run_id,
-                success=True,
-                data={"message": "Logged in successfully", "user": user}
+            await actions.wait_for_login_complete(
+                timeout_seconds=int(params.get("mfa_timeout_seconds", 240))
             )
 
+            # Export Holdings
+            if export_holdings and holdings_date:
+                await actions.export_holdings(holdings_date)
+                await log(f"OK Holdings exported for date: {holdings_date}")
+
+            # Export History
+            if export_history and history_date:
+                await actions.export_history(history_date, start_date=start_date, end_date=end_date)
+            if run:
+                update_data = {}
+                holdings_date = locals().get("holdings_date")
+                # For JPMorgan history uses start/end range, we typically use the query date or end date
+                history_date = locals().get("history_date") 
+                
+                if holdings_date:
+                    update_data["report_date"] = holdings_date
+                if history_date:
+                    update_data["history_date"] = history_date
+                
+                if update_data:
+                    await run.update({"$set": update_data})
+                await log(f"OK History exported for range: {start_date} - {end_date}")
+
+
+
+            await log("Sleeping for 10s for verification...")
+            await asyncio.sleep(10)
+
+            await actions.logout()
+            return self._success_result(run_id, credentials.username)
         except Exception as e:
-            await log(f"❌ Erro durante o login JPMorgan: {str(e)}")
-            
-            # Capture Debug Screenshot
+            # Attempt to save dates if they were calculated before error
             try:
-                timestamp = get_now().strftime("%Y%m%d_%H%M%S")
-                screenshot_path = f"/app/artifacts/error_jpmorgan_{timestamp}.png"
-                driver.save_screenshot(screenshot_path)
-                await log(f"📸 Screenshot salvo em: {screenshot_path}")
-            except Exception as ss_e:
-                await log(f"⚠️ Falha ao salvar screenshot: {ss_e}")
-            
-            # DEBUG: Wait for 2 minutes on error to allow visual inspection via VNC
-            await log("⏸️ Pausando por 120s para inspeção visual (erro)...")
-            await asyncio.sleep(120)
-            
-            return ScrapeResult(
-                run_id=run_id,
-                success=False,
-                error=str(e)
-            )
+                if run:
+                    update_data = {}
+                    holdings_date = locals().get("holdings_date")
+                    history_date = locals().get("history_date")
+                    if holdings_date:
+                        update_data["report_date"] = holdings_date
+                    if history_date:
+                         update_data["history_date"] = history_date
+                    if update_data:
+                        await run.update({"$set": update_data})
+            except Exception:
+                pass
+
+            try:
+                await actions.logout()
+            except Exception:
+                pass
+            return await self._handle_error(e, driver, run_id, log, credentials)

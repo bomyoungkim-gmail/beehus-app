@@ -70,5 +70,6 @@ class SeletorItauOnshore:
     EXTRATO_LOADING = (By.CSS_SELECTOR, "div.loading-nova-internet[aria-label='carregando']")
     
     # === LOGOUT ===
-    SAIR = (By.XPATH, "//a[contains(@class,'btn-nav')][.//span[normalize-space()='sair']]")
+    # === LOGOUT ===
+    SAIR = (By.ID, "linkSairHeader")
     SAIR_SIM = (By.XPATH, "//a[contains(@class,'itau-button')][.//span[normalize-space()='sim']]")

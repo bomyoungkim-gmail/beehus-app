@@ -3,6 +3,7 @@ Módulo de ações específicas para o conector Itaú Onshore.
 Encapsula toda a lógica de interação com o portal em métodos reutilizáveis.
 """
 
+import asyncio
 from typing import Callable
 from selenium.webdriver.remote.webdriver import WebDriver
 from core.connectors.helpers.selenium_helpers import SeleniumHelpers
@@ -184,7 +185,7 @@ class ItauOnshoreActions:
         self.helpers.wait_until(lambda d: export_menu.is_displayed() and export_menu.is_enabled())
         await self.log("OK Filtro aplicado")
 
-    async def export_extrato_excel(self) -> None:
+    async def export_history(self) -> None:
         """Exporta extrato para Excel."""
         await self.log("Exportando extrato para Excel...")
         # Aguarda o loading sumir para nao interceptar o clique
@@ -202,6 +203,8 @@ class ItauOnshoreActions:
 
         self.helpers.click_element(*self.sel.EXTRATO_EXCEL_SAVE)
         await self.log("OK Exportacao do extrato iniciada")
+        await self.log("Aguardando 15s para download...")
+        await asyncio.sleep(15)
 
     # ========== RELATÓRIOS ==========
     
@@ -227,7 +230,7 @@ class ItauOnshoreActions:
     
     
     
-    async def export_to_excel(self) -> None:
+    async def export_holdings(self) -> None:
         """Exporta o relatrio para Excel."""
         await self.log("Exportando para Excel...")
         try:
@@ -241,6 +244,8 @@ class ItauOnshoreActions:
                 self.helpers.click_element(*self.sel.EXCEL)
                 self.helpers.click_element(*self.sel.BAIXAR)
         await self.log("OK Exportacao iniciada")
+        await self.log("Aguardando 15s para download...")
+        await asyncio.sleep(15)
 
     # ========== LOGOUT ==========
 

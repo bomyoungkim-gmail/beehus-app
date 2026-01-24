@@ -12,7 +12,7 @@ class SeletorBtgOffshore:
     EMAIL = (By.CSS_SELECTOR, "input#email")
     PASSWORD = (By.CSS_SELECTOR, "input#password")
     SIGN_IN = (By.XPATH, "//button[normalize-space()='Sign in']")
-    PORTAL_GLOBAL = (By.XPATH, "//p[normalize-space()='Portal Global']")
+    PORTAL_GLOBAL = (By.CSS_SELECTOR, "fieldset.login__external-link")
 
     # OTP
     OTP_CODE = (By.ID, "code")
@@ -22,11 +22,16 @@ class SeletorBtgOffshore:
     COUNTRY_US = (By.XPATH, "//div[contains(@class,'orq-tabs__tab')]//span[normalize-space()='United States']")
 
     # Accounts
+    CHECKBOX_TOTAL = (By.CSS_SELECTOR, "orq-checkbox#Checkbox_TotalAccount input")
     ACCOUNT_CHECKBOXES = (By.CSS_SELECTOR, "input[type='checkbox'][aria-label='Checkbox']")
     ACCESS_BTN = (By.XPATH, "//button[normalize-space()='Access']")
 
     # Modal
     DONT_SHOW_AGAIN = (By.XPATH, "//span[normalize-space()=\"Don't show again\"]")
+    MODAL_OVERLAY = (By.CSS_SELECTOR, "div.orq-modal__overlay")
+    MODAL_CLOSE_BUTTON = (By.CSS_SELECTOR, "button.orq-modal__close-button")
+    MODAL_CLOSE = (By.CSS_SELECTOR, "button[aria-label='Close'], button.close, .icon-close")
+    MODAL_SKIP = (By.XPATH, "//button[contains(normalize-space(), 'Skip') or contains(normalize-space(), 'Close')]")
 
     # Filters / export
     DATE_INPUT = (By.CSS_SELECTOR, "input[placeholder*='Data de']")

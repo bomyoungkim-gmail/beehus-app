@@ -10,6 +10,7 @@ interface Run {
     connector: string;
     status: string;
     report_date?: string;
+    history_date?: string;
     node: string;
     created_at?: string;
 }
@@ -154,7 +155,8 @@ export default function Runs() {
                         <thead className="bg-white/5 text-slate-400 uppercase text-xs">
                             <tr>
                                 <th className="px-6 py-4">Executed At</th>
-                                <th className="px-6 py-4">Report Date</th>
+                                <th className="px-6 py-4">Position Date</th>
+                                <th className="px-6 py-4">History Date</th>
                                 <th className="px-6 py-4">Run ID</th>
                                 <th className="px-6 py-4">Connector</th>
                                 <th className="px-6 py-4">Status</th>
@@ -185,6 +187,7 @@ export default function Runs() {
                                             }) : '-'}
                                         </td>
                                         <td className="px-6 py-4 text-slate-300">{run.report_date || '-'}</td>
+                                        <td className="px-6 py-4 text-slate-300">{run.history_date || '-'}</td>
                                         <td className="px-6 py-4 font-mono text-slate-300">#{run.run_id.slice(0, 8)}</td>
                                         <td className="px-6 py-4 text-white">{run.connector}</td>
                                         <td className="px-6 py-4">

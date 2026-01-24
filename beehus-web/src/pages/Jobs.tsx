@@ -13,6 +13,17 @@ interface Job {
     params: Record<string, any>;
     schedule?: string;
     status: string;
+    
+    // Export options
+    export_holdings?: boolean;
+    export_history?: boolean;
+    
+    // Date configuration
+    date_mode?: string;
+    holdings_lag_days?: number;
+    history_lag_days?: number;
+    holdings_date?: string;
+    history_date?: string;
 }
 
 interface Workspace {
@@ -63,6 +74,9 @@ export default function Jobs() {
         isOpen: false, id: '', name: '' 
     });
     const [deleteAllModal, setDeleteAllModal] = useState(false);
+    const [viewParamsModal, setViewParamsModal] = useState<{ isOpen: boolean; job: Job | null }>({ 
+        isOpen: false, job: null 
+    });
 
     const { showToast } = useToast();
 
@@ -76,13 +90,27 @@ export default function Jobs() {
         credential_id?: string;
         params: { username?: string; password?: string; url?: string; selector?: string; [key: string]: any };
         schedule: string;
+        export_holdings: boolean;
+        export_history: boolean;
+        date_mode: string;
+        holdings_lag_days: number;
+        history_lag_days: number;
+        holdings_date: string;
+        history_date: string;
     }>({
         workspace_id: workspaceId || '',
         name: '',
         connector: 'jpmorgan_login',
         credential_id: '',
-        params: { username: '', password: '' },  // Dynamic based on connector
-        schedule: ''
+        params: { username: '', password: '' },
+        schedule: '',
+        export_holdings: true,
+        export_history: false,
+        date_mode: 'lag',
+        holdings_lag_days: 1,
+        history_lag_days: 2,
+        holdings_date: '',
+        history_date: ''
     });
 
     const fetchJobs = async () => {
@@ -170,7 +198,14 @@ export default function Jobs() {
                 name: '',
                 connector: 'jpmorgan_login',
                 params: { username: '', password: '' },
-                schedule: ''
+                schedule: '',
+                export_holdings: true,
+                export_history: false,
+                date_mode: 'lag',
+                holdings_lag_days: 1,
+                history_lag_days: 2,
+                holdings_date: '',
+                history_date: ''
             });
             setScheduleType('');
             setCustomCron('');
@@ -228,6 +263,24 @@ export default function Jobs() {
         return preset ? preset.label : cronExpr;
     };
 
+    const getDateConfigLabel = (job: Job, type: 'relatorio' | 'extrato') => {
+        if (job.date_mode === 'specific') {
+            const date = type === 'relatorio' ? job.holdings_date : job.history_date;
+            if (!date) return '-';
+            
+            // Convert YYYY-MM-DD to DD/MM/YYYY for display
+            try {
+                const [year, month, day] = date.split('-');
+                return `${day}/${month}/${year}`;
+            } catch {
+                return date; // Fallback to original if parsing fails
+            }
+        } else {
+            const lag = type === 'relatorio' ? (job.holdings_lag_days || 1) : (job.history_lag_days || 2);
+            return `D-${lag}`;
+        }
+    };
+
     const deleteAllJobs = () => {
         setDeleteAllModal(true);
     };
@@ -277,8 +330,12 @@ export default function Jobs() {
                         <thead className="bg-white/5 text-slate-400 uppercase text-xs">
                             <tr>
                                 <th className="px-6 py-4">Job Name</th>
+                                <th className="px-6 py-4">View</th>
                                 <th className="px-6 py-4">Connector</th>
                                 <th className="px-6 py-4">Schedule</th>
+                                <th className="px-6 py-4">Schedule</th>
+                                <th className="px-6 py-4">Posição</th>
+                                <th className="px-6 py-4">Histórico</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Actions</th>
                             </tr>
@@ -286,13 +343,13 @@ export default function Jobs() {
                         <tbody className="divide-y divide-white/5 text-sm">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400">
+                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-400">
                                         Loading jobs...
                                     </td>
                                 </tr>
                             ) : jobs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-500">
                                         No jobs yet. Create your first job!
                                     </td>
                                 </tr>
@@ -305,6 +362,17 @@ export default function Jobs() {
                                                 <p className="text-xs text-slate-500 font-mono">#{job.id.slice(0, 8)}</p>
                                             </div>
                                         </td>
+                                        <td className="px-6 py-4">
+                                            <button
+                                                onClick={() => setViewParamsModal({ isOpen: true, job })}
+                                                className="text-brand-400 hover:text-brand-300 transition-colors flex items-center space-x-1"
+                                            >
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                                </svg>
+                                            </button>
+                                        </td>
                                         <td className="px-6 py-4 text-slate-300">{job.connector}</td>
                                         <td className="px-6 py-4">
                                             {job.schedule ? (
@@ -314,6 +382,20 @@ export default function Jobs() {
                                                 </div>
                                             ) : (
                                                 <span className="text-slate-500 text-xs">Manual only</span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {job.export_holdings ? (
+                                                <span className="text-sm text-slate-300">{getDateConfigLabel(job, 'relatorio')}</span>
+                                            ) : (
+                                                <span className="text-slate-500 text-xs">-</span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {job.export_history ? (
+                                                <span className="text-sm text-slate-300">{getDateConfigLabel(job, 'extrato')}</span>
+                                            ) : (
+                                                <span className="text-slate-500 text-xs">-</span>
                                             )}
                                         </td>
                                         <td className="px-6 py-4">
@@ -399,6 +481,7 @@ export default function Jobs() {
                                         <option value="itau_offshore_login">Itau Offshore Login</option>
                                         <option value="btg_onshore_login">BTG Onshore Login</option>
                                         <option value="btg_offshore_login">BTG Offshore Login</option>
+                                        <option value="btg_mfo_login">BTG MFO Login</option>
                                         <option value="morgan_stanley_login">Morgan Stanley Login</option>
                                         <option value="jefferies_login">Jefferies Login</option>
                                         {/* <option value="generic_scraper">Generic Scraper</option> */}
@@ -414,7 +497,20 @@ export default function Jobs() {
                                             onClick={() => {
                                                 if (!jsonMode) {
                                                     // Switching TO JSON mode: convert form to JSON
-                                                    setJsonParams(JSON.stringify(formData.params, null, 2));
+                                                    const allParams = {
+                                                        ...formData.params,
+                                                        export_holdings: formData.export_holdings,
+                                                        export_history: formData.export_history,
+                                                        date_mode: formData.date_mode,
+                                                        ...(formData.date_mode === 'lag' ? {
+                                                            holdings_lag_days: formData.holdings_lag_days,
+                                                            history_lag_days: formData.history_lag_days,
+                                                        } : {
+                                                            holdings_date: formData.holdings_date,
+                                                            history_date: formData.history_date,
+                                                        })
+                                                    };
+                                                    setJsonParams(JSON.stringify(allParams, null, 2));
                                                 }
                                                 setJsonMode(!jsonMode);
                                             }}
@@ -442,7 +538,7 @@ export default function Jobs() {
                                         </div>
                                     ) : (
                                         <>
-                                            {['jpmorgan_login', 'itau_onshore_login', 'itau_offshore_login', 'btg_onshore_login', 'btg_offshore_login', 'morgan_stanley_login', 'jefferies_login'].includes(formData.connector) ? (
+                                            {['jpmorgan_login', 'itau_onshore_login', 'itau_offshore_login', 'btg_onshore_login', 'btg_offshore_login', 'btg_mfo_login', 'morgan_stanley_login', 'jefferies_login'].includes(formData.connector) ? (
                                                 <div className="space-y-4">
                                                     {/* Credential Selector */}
                                                     <div>
@@ -511,59 +607,148 @@ export default function Jobs() {
                                                         </div>
                                                     )}
 
-                                                    <div className="space-y-3">
-                                                        <label className="flex items-center space-x-2 text-sm text-slate-400">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={(formData.params as any).use_business_day || false}
-                                                                onChange={(e) => setFormData({
-                                                                    ...formData,
-                                                                    params: {
-                                                                        ...formData.params,
-                                                                        use_business_day: e.target.checked
-                                                                    }
-                                                                })}
-                                                                className="rounded border-white/10 bg-dark-surface"
-                                                            />
-                                                            <span>Use specific report date</span>
-                                                        </label>
-                                                        <input
-                                                            type="date"
-                                                            value={(formData.params as any).business_day || ''}
-                                                            onChange={(e) => setFormData({
-                                                                ...formData,
-                                                                params: {
-                                                                    ...formData.params,
-                                                                    business_day: e.target.value
-                                                                }
-                                                            })}
-                                                            disabled={!(formData.params as any).use_business_day}
-                                                            className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500 disabled:opacity-50"
-                                                        />
-                                                        <p className="text-xs text-slate-500">
-                                                            When enabled, this date overrides the default business day.
-                                                        </p>
-                                                    </div>
+                                                    {/* Export Options and Date Configuration */}
+                                                    <div className="border border-white/10 rounded-lg p-4 space-y-4">
+                                                        <h5 className="text-sm font-semibold text-slate-300">Exportações</h5>
+                                                        
+                                                        {/* Export Checkboxes - Side by Side */}
+                                                        <div className="grid grid-cols-2 gap-4">
+                                                            <label className="flex items-center space-x-2 text-sm text-slate-400">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={formData.export_holdings}
+                                                                    onChange={(e) => setFormData({
+                                                                        ...formData,
+                                                                        export_holdings: e.target.checked
+                                                                    })}
+                                                                    className="rounded border-white/10 bg-dark-surface"
+                                                                />
+                                                                <span>Exportar Posição</span>
+                                                            </label>
+                                                            <label className="flex items-center space-x-2 text-sm text-slate-400">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={formData.export_history}
+                                                                    onChange={(e) => setFormData({
+                                                                        ...formData,
+                                                                        export_history: e.target.checked
+                                                                    })}
+                                                                    className="rounded border-white/10 bg-dark-surface"
+                                                                />
+                                                                <span>Exportar Histórico</span>
+                                                            </label>
+                                                        </div>
 
-                                                    <div className="space-y-2">
-                                                        <label className="flex items-center space-x-2 text-sm text-slate-400">
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={(formData.params as any).export_extrato || false}
-                                                                onChange={(e) => setFormData({
-                                                                    ...formData,
-                                                                    params: {
-                                                                        ...formData.params,
-                                                                        export_extrato: e.target.checked
-                                                                    }
-                                                                })}
-                                                                className="rounded border-white/10 bg-dark-surface"
-                                                            />
-                                                            <span>Export extrato (uses business day)</span>
-                                                        </label>
-                                                        <p className="text-xs text-slate-500">
-                                                            This uses the report date as the extrato period.
-                                                        </p>
+                                                        {/* Date Configuration Mode */}
+                                                        <div className="space-y-3">
+                                                            <p className="text-sm text-slate-400">Configuração de Datas:</p>
+                                                            <div className="grid grid-cols-2 gap-4">
+                                                                <label className="flex items-center space-x-2 text-sm text-slate-400">
+                                                                    <input
+                                                                        type="radio"
+                                                                        name="date_mode"
+                                                                        checked={formData.date_mode === 'lag'}
+                                                                        onChange={() => setFormData({
+                                                                            ...formData,
+                                                                            date_mode: 'lag'
+                                                                        })}
+                                                                        className="border-white/10 bg-dark-surface"
+                                                                    />
+                                                                    <span>Usar defasagem (dias úteis)</span>
+                                                                </label>
+                                                                <label className="flex items-center space-x-2 text-sm text-slate-400">
+                                                                    <input
+                                                                        type="radio"
+                                                                        name="date_mode"
+                                                                        checked={formData.date_mode === 'specific'}
+                                                                        onChange={() => setFormData({
+                                                                            ...formData,
+                                                                            date_mode: 'specific'
+                                                                        })}
+                                                                        className="border-white/10 bg-dark-surface"
+                                                                    />
+                                                                    <span>Usar datas específicas</span>
+                                                                </label>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Lag-based Configuration */}
+                                                        {formData.date_mode === 'lag' && (
+                                                            <div className="border border-white/5 rounded-lg p-3 bg-white/5">
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <div>
+                                                                        <label className="block text-sm text-slate-400 mb-2">Posição:</label>
+                                                                        <div className="flex items-center space-x-2">
+                                                                            <span className="text-slate-400">D-</span>
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                value={formData.holdings_lag_days}
+                                                                                onChange={(e) => setFormData({
+                                                                                    ...formData,
+                                                                                    holdings_lag_days: parseInt(e.target.value) || 1
+                                                                                })}
+                                                                                disabled={!formData.export_holdings}
+                                                                                className="w-20 bg-dark-surface border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                                                                            />
+                                                                            <span className="text-slate-400 text-sm">dias úteis</span>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-sm text-slate-400 mb-2">Histórico:</label>
+                                                                        <div className="flex items-center space-x-2">
+                                                                            <span className="text-slate-400">D-</span>
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                value={formData.history_lag_days}
+                                                                                onChange={(e) => setFormData({
+                                                                                    ...formData,
+                                                                                    history_lag_days: parseInt(e.target.value) || 2
+                                                                                })}
+                                                                                disabled={!formData.export_history}
+                                                                                className="w-20 bg-dark-surface border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                                                                            />
+                                                                            <span className="text-slate-400 text-sm">dias úteis</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Specific Date Configuration */}
+                                                        {formData.date_mode === 'specific' && (
+                                                            <div className="border border-white/5 rounded-lg p-3 bg-white/5">
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <div>
+                                                                        <label className="block text-sm text-slate-400 mb-2">Posição:</label>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={formData.holdings_date}
+                                                                            onChange={(e) => setFormData({
+                                                                                ...formData,
+                                                                                holdings_date: e.target.value
+                                                                            })}
+                                                                            disabled={!formData.export_holdings}
+                                                                            className="w-full bg-dark-surface border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-sm text-slate-400 mb-2">Histórico:</label>
+                                                                        <input
+                                                                            type="date"
+                                                                            value={formData.history_date}
+                                                                            onChange={(e) => setFormData({
+                                                                                ...formData,
+                                                                                history_date: e.target.value
+                                                                            })}
+                                                                            disabled={!formData.export_history}
+                                                                            className="w-full bg-dark-surface border border-white/10 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </div>
                                             ) : (
@@ -687,6 +872,45 @@ export default function Jobs() {
                 onConfirm={handleConfirmDeleteAll}
                 onCancel={() => setDeleteAllModal(false)}
             />
+
+            {/* View Parameters Modal */}
+            {viewParamsModal.isOpen && viewParamsModal.job && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="bg-dark-card border border-white/10 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+                        <div className="p-6 border-b border-white/10 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-lg font-semibold text-white">Job Parameters</h3>
+                                <p className="text-sm text-slate-400 mt-1">{viewParamsModal.job.name}</p>
+                            </div>
+                            <button
+                                onClick={() => setViewParamsModal({ isOpen: false, job: null })}
+                                className="text-slate-400 hover:text-white transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="p-6 overflow-auto">
+                            <pre className="bg-dark-surface border border-white/10 rounded-lg p-4 text-sm text-slate-300 font-mono overflow-x-auto">
+{JSON.stringify({
+    ...viewParamsModal.job.params,
+    export_holdings: viewParamsModal.job.export_holdings ?? true,
+    export_history: viewParamsModal.job.export_history ?? false,
+    date_mode: viewParamsModal.job.date_mode ?? 'lag',
+    ...((viewParamsModal.job.date_mode ?? 'lag') === 'lag' ? {
+        holdings_lag_days: viewParamsModal.job.holdings_lag_days ?? 1,
+        history_lag_days: viewParamsModal.job.history_lag_days ?? 2,
+    } : {
+        holdings_date: viewParamsModal.job.holdings_date ?? '',
+        history_date: viewParamsModal.job.history_date ?? '',
+    })
+}, null, 2)}
+                            </pre>
+                        </div>
+                    </div>
+                </div>
+            )}
         </Layout>
     );
 }

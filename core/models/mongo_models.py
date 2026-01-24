@@ -95,6 +95,22 @@ class Job(Document):
     params: dict = {}  # Job-specific parameters
     schedule: Optional[str] = None  # Cron expression for periodic execution
     status: str = "active"  # active, paused, deleted
+    
+    # Export options
+    export_holdings: bool = True  # Export portfolio report
+    export_history: bool = False   # Export transaction statement
+    
+    # Date configuration mode (mutually exclusive)
+    date_mode: str = "lag"  # "lag" or "specific"
+    
+    # Lag-based configuration (when date_mode = "lag")
+    holdings_lag_days: int = 1  # D-1 by default
+    history_lag_days: int = 2    # D-2 by default
+    
+    # Specific date configuration (when date_mode = "specific")
+    holdings_date: Optional[str] = None  # Format: YYYY-MM-DD
+    history_date: Optional[str] = None    # Format: YYYY-MM-DD
+    
     created_at: datetime = Field(default_factory=get_now)
     
     class Settings:
@@ -111,7 +127,8 @@ class Run(Document):
     celery_task_id: Optional[str] = None  # For task cancellation
     error_summary: Optional[str] = None
     logs: List[str] = []
-    report_date: Optional[str] = None  # Business day used for report (DD/MM/YYYY)
+    report_date: Optional[str] = None  # Position Date (DD/MM/YYYY)
+    history_date: Optional[str] = None  # History Date (DD/MM/YYYY)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=get_now)

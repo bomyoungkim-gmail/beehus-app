@@ -61,6 +61,49 @@ class BtgOffshoreActions:
         except Exception as exc:
             raise TimeoutException(timeout_msg) from exc
 
+    def _overlay_visible(self) -> bool:
+        return self._is_visible(self.sel.MODAL_OVERLAY)
+
+    async def dismiss_modal_overlay(self, context: str = "") -> None:
+        if not self._overlay_visible():
+            return
+
+        suffix = f" ({context})" if context else ""
+        await self.log(f"INFO Modal overlay detected{suffix}")
+
+        for _ in range(3):
+            if not self._overlay_visible():
+                return
+
+            if self._click_if_visible(self.sel.DONT_SHOW_AGAIN):
+                await self.log("OK Dismissed modal (Don't show again)")
+            elif self._click_if_visible(self.sel.MODAL_CLOSE_BUTTON):
+                await self.log("OK Dismissed modal (Close button)")
+            elif self._click_if_visible(self.sel.MODAL_CLOSE):
+                await self.log("OK Dismissed modal (Close icon/btn)")
+            elif self._click_if_visible(self.sel.MODAL_SKIP):
+                await self.log("OK Dismissed modal (Skip/Close text)")
+            else:
+                try:
+                    ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+                    await self.log("OK Sent ESCAPE key to dismiss modal")
+                except Exception:
+                    pass
+
+            time.sleep(1)
+
+        if self._overlay_visible():
+            overlays = self.driver.find_elements(*self.sel.MODAL_OVERLAY)
+            if overlays:
+                try:
+                    self.driver.execute_script("arguments[0].click();", overlays[-1])
+                    time.sleep(1)
+                except Exception:
+                    pass
+
+        if self._overlay_visible():
+            await self.log("WARN Modal overlay still visible after attempts")
+
     # ========== NAVIGATION ==========
 
     async def navigate_to_login(self, url: str) -> None:
@@ -145,17 +188,34 @@ class BtgOffshoreActions:
             await self.log("WARN Country tab not visible: United States")
 
     async def select_all_accounts(self) -> None:
+        """Selects all available accounts using JS click for reliability."""
         try:
-            self.helpers.wait_for_element(*self.sel.ACCOUNT_CHECKBOXES)
-        except TimeoutException:
-            await self.log("WARN Account checkboxes not visible")
-            return
+            # Try specific "Select All" checkbox first
+            total_chk = self.driver.find_elements(*self.sel.CHECKBOX_TOTAL)
+            if total_chk:
+                self.log("INFO Found Total Checkbox, attempting click...")
+                # Use JS click as the input might be hidden/overlayed
+                self.driver.execute_script("arguments[0].click();", total_chk[0])
+                time.sleep(1) # Wait for UI to update
+                await self.log("OK Total Checkbox clicked")
+                return
 
-        checkboxes = self.driver.find_elements(*self.sel.ACCOUNT_CHECKBOXES)
-        for chk in checkboxes:
-            if chk.is_displayed() and chk.is_enabled() and not chk.is_selected():
-                chk.click()
-        await self.log("OK Accounts selected")
+            # Fallback to individual checkboxes
+            await self.log("INFO Total Checkbox not found, selecting individually")
+            checkboxes = self.driver.find_elements(*self.sel.ACCOUNT_CHECKBOXES)
+            clicked_count = 0
+            for chk in checkboxes:
+                if not chk.is_selected():
+                    self.driver.execute_script("arguments[0].click();", chk)
+                    clicked_count += 1
+            
+            if clicked_count > 0:
+                await self.log(f"OK Selected {clicked_count} individual accounts")
+            else:
+                await self.log("INFO No unselected accounts found")
+
+        except Exception as e:
+            await self.log(f"WARN Error selecting accounts: {e}")
 
     async def submit_access(self) -> None:
         access_btn = self._wait_enabled(self.sel.ACCESS_BTN)
@@ -163,12 +223,34 @@ class BtgOffshoreActions:
         await self.log("OK Access submitted")
 
     async def dismiss_biometric_modal(self) -> None:
+        """Dismisses any welcome/security modals."""
+        await self.dismiss_modal_overlay("post-access")
+
+        # Try specific "Don't show again"
         if self._click_if_visible(self.sel.DONT_SHOW_AGAIN):
-            await self.log("OK Dismissed biometric modal")
+            await self.log("OK Dismissed modal (Don't show again)")
+            return
+
+        # Try generic close/skip
+        if self._click_if_visible(self.sel.MODAL_CLOSE):
+            await self.log("OK Dismissed modal (Close icon/btn)")
+            return
+        
+        if self._click_if_visible(self.sel.MODAL_SKIP):
+            await self.log("OK Dismissed modal (Skip/Close text)")
+            return
+
+        # Try ESCAPE key
+        try:
+            ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+            await self.log("OK Sent ESCAPE key to dismiss modal")
+        except Exception:
+            pass
 
     # ========== FILTER / EXPORT ==========
 
     async def open_start_date_input(self) -> None:
+        await self.dismiss_modal_overlay("before start date input")
         self.helpers.click_element(*self.sel.DATE_INPUT)
         await self.log("OK Start date input opened")
 
@@ -276,3 +358,45 @@ class BtgOffshoreActions:
     async def click_sign_out(self) -> None:
         self.helpers.click_element(*self.sel.SIGN_OUT)
         await self.log("OK Sign out clicked")
+
+    # ========== EXPORT METHODS ==========
+
+    async def export_holdings(self, date: str) -> None:
+        """
+        Export holdings/portfolio report.
+        
+        Args:
+            date: Report date in MM/DD/YYYY format (US format)
+        """
+        await self.log(f"Exporting holdings for date: {date}")
+        
+        # Set date and configure export
+        await self.open_start_date_input()
+        await self.select_calendar_date(date)
+        await self.open_check_all_anchor()
+        await self.open_export_options()
+        await self.select_export_all()
+        await self.open_portfolio()
+        await self.click_portfolio_check_all()
+        
+        await self.log("OK Holdings export completed")
+
+    async def export_history(self, date: str) -> None:
+        """
+        Export transaction history report.
+        
+        Args:
+            date: Report date in MM/DD/YYYY format (US format)
+        """
+        await self.log(f"Exporting history for date: {date}")
+        
+        # Set custom period and export
+        await self.open_filters()
+        await self.open_time_period()
+        await self.select_custom_period()
+        await self.set_custom_period_dates(date)
+        await self.click_filter()
+        await self.click_export()
+        await self.click_download()
+        
+        await self.log("OK History export completed")

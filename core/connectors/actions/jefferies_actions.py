@@ -83,13 +83,20 @@ class JefferiesActions:
     async def accept_cookies_if_needed(self) -> None:
         if self._click_if_visible(self.sel.COOKIES_ACCEPT):
             await self.log("OK Cookies accepted")
+            # Wait for banner to disappear to avoid interception
+            try:
+                self.helpers.wait_for_invisibility((By.ID, "onetrust-consent-sdk"))
+            except Exception:
+                pass
+            
             try:
                 self.helpers.wait_for_visible(*self.sel.LOGIN_OPEN_BTN)
             except Exception:
                 pass
 
     async def ensure_login_dialog(self) -> None:
-        if self._is_visible(self.sel.USER_ID):
+        # Check if already visible (input field)
+        if self._is_visible(self.sel.USER_ID) or self._is_visible(self.sel.USER_ID_ALT):
             return
 
         await self.log("INFO Login dialog not visible, opening it")
@@ -98,33 +105,72 @@ class JefferiesActions:
             self.helpers.wait_for_element(*self.sel.LOGIN_OPEN_BTN)
         except Exception:
             pass
-
-        # Wait for any blocking overlay to disappear before clicking.
+        
+        # Aggressive overlay cleanupwait
         try:
-            self.helpers.wait_for_invisibility(*self.sel.OVERLAY_BACKDROP)
+             self.helpers.wait_for_invisibility((By.CSS_SELECTOR, "div.cdk-overlay-backdrop"))
+             self.helpers.wait_for_invisibility((By.CSS_SELECTOR, "div.onetrust-pc-dark-filter"))
         except Exception:
-            pass
+             pass
 
-        if not self._click_if_visible(self.sel.LOGIN_OPEN_BTN):
+        # Use JS Click to bypass simple overlay interruptions if element is present
+        try:
+            login_btn = self.helpers.find_element(*self.sel.LOGIN_OPEN_BTN)
+            # Scroll to view
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", login_btn)
+            await self.helpers.sleep(1) # tiny pause for scroll
+            
             try:
-                self.helpers.click_element(*self.sel.LOGIN_OPEN_BTN_TEXT)
+                login_btn.click()
             except Exception:
-                # Fallback: force click if overlay keeps intercepting.
-                login_btn = self.helpers.find_element(*self.sel.LOGIN_OPEN_BTN)
+                await self.log("WARN Standard click failed, trying JS click")
                 self.driver.execute_script("arguments[0].click();", login_btn)
+                
+        except Exception as e:
+            await self.log(f"WARN Could not click login opening button: {e}")
 
         # Ensure the dialog is ready; some flows render a backdrop first.
         try:
             self.helpers.wait_for_invisibility(*self.sel.OVERLAY_BACKDROP)
         except Exception:
             pass
-        self.helpers.wait_for_visible(*self.sel.USER_ID)
+        self._wait_for_login_input()
+
+    def _wait_for_login_input(self) -> None:
+        self._find_visible_input(
+            [
+                self.sel.USER_ID,
+                self.sel.USER_ID_ALT,
+            ]
+        )
+
+    def _find_visible_input(self, locators):
+        for locator in locators:
+            elements = self.driver.find_elements(*locator)
+            for el in elements:
+                if el.is_displayed() and el.is_enabled():
+                    return el
+        raise RuntimeError("No visible input found")
 
     # ========== LOGIN ==========
 
     async def fill_credentials(self, username: str, password: str) -> None:
-        self.helpers.clear_and_send_keys(*self.sel.USER_ID, username)
-        self.helpers.clear_and_send_keys(*self.sel.PASSWORD, password)
+        user_input = self._find_visible_input(
+            [
+                self.sel.USER_ID,
+                self.sel.USER_ID_ALT,
+            ]
+        )
+        user_input.clear()
+        user_input.send_keys(username)
+
+        password_input = self._find_visible_input(
+            [
+                self.sel.PASSWORD,
+            ]
+        )
+        password_input.clear()
+        password_input.send_keys(password)
         await self.log("OK Credentials filled")
 
         login_btn = self._wait_enabled(self.sel.LOGIN_SUBMIT)
@@ -141,20 +187,36 @@ class JefferiesActions:
         self.helpers.click_element(*self.sel.SEND_CODE)
         await self.log("OK OTP requested")
 
-    async def wait_for_otp(self, timeout_seconds: int = 240) -> None:
+    async def wait_for_otp(self, timeout_seconds: int = 240, max_attempts: int = 3) -> None:
         self.helpers.wait_for_element(*self.sel.OTP_INPUT)
         await self.log("INFO Waiting for OTP entry")
 
-        verify_btn = self._wait_enabled(self.sel.VERIFY_OTP, timeout=timeout_seconds)
-        verify_btn.click()
-        await self.log("OK OTP verified")
+        attempts = 0
+        while attempts < max_attempts:
+            verify_btn = self._wait_enabled(self.sel.VERIFY_OTP, timeout=timeout_seconds)
+            verify_btn.click()
+
+            try:
+                self.helpers.wait_for_visible(*self.sel.OTP_ERROR)
+                attempts += 1
+                await self.log("WARN OTP invalid, requesting new code")
+                self.helpers.click_element(*self.sel.OTP_RESEND)
+                self.helpers.wait_for_invisibility(*self.sel.OTP_ERROR)
+                self.helpers.wait_for_element(*self.sel.OTP_INPUT)
+                await self.log("INFO Waiting for new OTP entry")
+                continue
+            except Exception:
+                await self.log("OK OTP verified")
+                return
+
+        raise RuntimeError("OTP attempts exceeded")
 
     # ========== EXPORTS ==========
 
-    async def export_holdings(self) -> None:
+    async def export_holdings(self, date: str = None) -> None:
         self.helpers.click_element(*self.sel.NAV_ACCOUNTS)
         self.helpers.click_element(*self.sel.NAV_HOLDINGS)
-        await self.log("OK Holdings opened")
+        await self.log(f"OK Holdings opened (Target date: {date})")
 
         self.helpers.click_element(*self.sel.SHOWING_SELECT)
         self.helpers.click_element(*self.sel.PRIOR_CLOSE_OPTION)
@@ -171,9 +233,9 @@ class JefferiesActions:
         self.helpers.click_element(*self.sel.EXPORT_EXCEL)
         await self.log("OK Holdings exported")
 
-    async def export_history(self) -> None:
+    async def export_history(self, date: str = None, start_date: str = None, end_date: str = None) -> None:
         self.helpers.click_element(*self.sel.NAV_HISTORY)
-        await self.log("OK History opened")
+        await self.log(f"OK History opened (Target date: {date})")
 
         self.helpers.click_element(*self.sel.TIME_PERIOD)
         self.helpers.click_element(*self.sel.PREV_BUSINESS_DAY)

@@ -72,10 +72,6 @@ class ItauOffshoreConnector(BaseConnector):
             
             await log("Clicked Sign In")
             
-            # Aguarda o tempo solicitado
-            await log("✅ Login Success! Sleeping for 120s for visual verification...")
-            await asyncio.sleep(120)
-
             return ScrapeResult(
                 run_id=run_id,
                 success=True,
@@ -93,10 +89,6 @@ class ItauOffshoreConnector(BaseConnector):
                 await log(f"📸 Screenshot salvo em: {screenshot_path}")
             except Exception as ss_e:
                 await log(f"⚠️ Falha ao salvar screenshot: {ss_e}")
-            
-            # DEBUG: Wait for 2 minutes on error to allow visual inspection via VNC
-            await log("⏸️ Pausando por 120s para inspeção visual (erro)...")
-            await asyncio.sleep(120)
             
             return ScrapeResult(
                 run_id=run_id,

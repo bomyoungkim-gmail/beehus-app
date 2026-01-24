@@ -15,9 +15,15 @@ class SeletorJefferies:
     LOGIN_OPEN_BTN = (By.CSS_SELECTOR, "button[aria-label='Login']")
     LOGIN_OPEN_BTN_TEXT = (By.XPATH, "//button[.//span[normalize-space()='Login']]")
     USER_ID = (By.ID, "userid")
+    USER_ID_ALT = (
+        By.CSS_SELECTOR,
+        "input[name='userid'], input[aria-labelledby='userIDLabel'], "
+        "input[placeholder*='User ID'], input[placeholder*='email']",
+    )
     PASSWORD = (By.ID, "password")
     LOGIN_SUBMIT = (By.ID, "loginButton1")
     OVERLAY_BACKDROP = (By.CSS_SELECTOR, "div.cdk-overlay-backdrop")
+    LOGIN_DIALOG = (By.CSS_SELECTOR, "mat-dialog-container, div.mat-dialog-container")
 
     # OTP
     CONTACT_METHOD = (By.CSS_SELECTOR, "mat-select[name='selectedContact']")
@@ -25,6 +31,8 @@ class SeletorJefferies:
     SEND_CODE = (By.ID, "reqOTPButton")
     OTP_INPUT = (By.ID, "otp")
     VERIFY_OTP = (By.ID, "verifyOTP")
+    OTP_ERROR = (By.CSS_SELECTOR, "div.alert-inpage.error")
+    OTP_RESEND = (By.ID, "sendNewCode")
 
     # Holdings
     NAV_ACCOUNTS = (By.CSS_SELECTOR, "a.nav-accounts")

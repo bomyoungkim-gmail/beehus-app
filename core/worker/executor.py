@@ -1,4 +1,5 @@
 import logging
+import os
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -8,20 +9,23 @@ logger = logging.getLogger(__name__)
 
 class SeleniumExecutor:
     """
-    Manages the lifecycle of a Selenium WebDriver instance connected to the Grid.
+    Manages the lifecycle of a Selenium WebDriver instance.
+    Supports Hybrid Mode:
+    - Local: Uses undetected-chromedriver (for JP Morgan evasion)
+    - Remote: Uses Selenium Grid (for standard scraping)
     """
-    def __init__(self):
+    def __init__(self, use_local: bool = False):
         self.driver = None
         self.node_id = None
+        self.use_local = use_local
 
     def start(self):
-        """Initializes the remote webdriver connection."""
+        """Initializes the webdriver connection based on mode."""
         if self.driver:
             return
 
         chrome_options = Options()
-        # Ensure we run headless if needed, though on Grid usually it doesn't matter as much, 
-        # but good practice for consistency.
+        # Basic options for stability and container compatibility
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--start-maximized")
@@ -34,7 +38,7 @@ class SeleniumExecutor:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/122.0.0.0 Safari/537.36"
         )
-        # chrome_options.add_argument("--headless") # Optional, helpful for stability
+        # chrome_options.add_argument("--headless") # Disabled to allow VNC visibility
 
         prefs = {
             "download.default_directory": "/home/seluser/Downloads",
@@ -48,22 +52,55 @@ class SeleniumExecutor:
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option("useAutomationExtension", False)
 
-        logger.info(f"🔌 Connecting to Selenium Grid at {settings.SELENIUM_REMOTE_URL}...")
-        
-        try:
-            self.driver = webdriver.Remote(
-                command_executor=settings.SELENIUM_REMOTE_URL,
-                options=chrome_options
-            )
-            logger.info(f"✅ Created remote driver session: {self.driver.session_id}")
-            
-            # Try to get node info
-            self.node_id = self.get_node_info()
-            if self.node_id:
-                logger.info(f"📍 Executing on node: {self.node_id}")
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to Selenium Grid: {e}")
-            raise
+        if self.use_local:
+            # --- LOCAL EXECUTION (JP Morgan Evasion) ---
+            logger.info("🔌 Initializing Driver (LOCAL Mode for Evasion)...")
+            try:
+                os.environ["DISPLAY"] = os.environ.get("DISPLAY", ":99")
+                import undetected_chromedriver as uc
+                logger.info("⚡ Attempting to start Local Undetected Chrome...")
+                
+                uc_options = uc.ChromeOptions()
+                for arg in chrome_options.arguments:
+                    if "--headless" not in arg:
+                        uc_options.add_argument(arg)
+
+                uc_options.add_argument("--no-sandbox")
+                uc_options.add_argument("--disable-dev-shm-usage")
+                uc_options.add_argument("--window-size=1920,1080")
+                uc_options.add_argument("--window-position=0,0")
+                uc_options.add_argument("--disable-gpu")
+                uc_options.add_argument("--no-first-run")
+                uc_options.add_argument("--no-default-browser-check")
+                
+                self.driver = uc.Chrome(
+                    options=uc_options,
+                    version_main=None,
+                    headless=False,
+                    use_subprocess=True,
+                )
+                logger.info(f"✅ Created Local UC driver session: {self.driver.session_id}")
+                self.node_id = "LOCAL_WORKER_CONTAINER"
+            except Exception as e:
+                logger.error(f"❌ Failed to start local driver: {e}")
+                raise
+        else:
+            # --- REMOTE GRID EXECUTION (Standard) ---
+            logger.info(f"🔌 Initializing Driver (REMOTE Mode at {settings.SELENIUM_REMOTE_URL})...")
+            try:
+                self.driver = webdriver.Remote(
+                    command_executor=settings.SELENIUM_REMOTE_URL,
+                    options=chrome_options
+                )
+                logger.info(f"✅ Created remote driver session: {self.driver.session_id}")
+                
+                # Try to get node info
+                self.node_id = self.get_node_info()
+                if self.node_id:
+                     logger.info(f"📍 Executing on node: {self.node_id}")
+            except Exception as e:
+                 logger.error(f"❌ Failed to connect to Selenium Grid: {e}")
+                 raise
 
     def get_node_info(self):
         """Attempt to retrieve the node ID from Selenium Grid."""
@@ -85,7 +122,6 @@ class SeleniumExecutor:
                     if node_id:
                         return node_id
             
-            # Fallback: use a generic identifier
             return "selenium-node-1"
         except Exception as e:
             logger.warning(f"Could not determine node ID: {e}")

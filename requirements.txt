@@ -45,3 +45,5 @@ bcrypt==4.0.1
 python-multipart==0.0.6
 email-validator
 holidays
+undetected-chromedriver==3.5.5
+selenium-stealth==1.0.6

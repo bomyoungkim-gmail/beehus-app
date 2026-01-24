@@ -8,6 +8,7 @@ interface RunData {
     status: string;
     logs: string[];
     error_summary?: string;
+    connector?: string;
 }
 
 export default function LiveView() {
@@ -88,6 +89,12 @@ export default function LiveView() {
       <div className="p-8 text-slate-400">Loading run details...</div>
   );
 
+  const isLocalEvasion = run?.connector?.includes('jpmorgan');
+  const vncPort = isLocalEvasion ? '7901' : '7900'; // 7901=Worker(Local), 7900=Grid(Remote)
+  const baseUrl = import.meta.env.VITE_VNC_URL_BASE || 'http://localhost';
+  const vncUrl = `${baseUrl}:${vncPort}/?autoconnect=true&resize=scale&password=${import.meta.env.VITE_VNC_PASSWORD || 'secret'}`;
+  const fullVncUrl = import.meta.env.VITE_VNC_URL || vncUrl;
+
   return (
     <div className="flex flex-col h-screen bg-black/50 backdrop-blur-3xl">
          {/* Header */}
@@ -113,7 +120,7 @@ export default function LiveView() {
             </div>
             <div className="flex items-center space-x-3">
                 <a 
-                    href={import.meta.env.VITE_VNC_URL || "http://localhost:7900"} 
+                    href={fullVncUrl} 
                     target="_blank" 
                     rel="noreferrer"
                     className="text-xs text-brand-500 hover:underline"
@@ -177,34 +184,40 @@ export default function LiveView() {
                 )}
             </div>
 
-            {/* Main Content (Selenium Stream) */}
+            {/* Main Content (Hybrid Stream) */}
             <div className="flex-1 bg-black relative flex flex-col justify-center items-center p-4">
                  
-                 <div className="w-full h-full bg-slate-900 rounded-lg overflow-hidden border border-slate-700 shadow-2xl relative">
-                    {/* VNC Iframe */}
-                    <iframe 
-                        src={`${import.meta.env.VITE_VNC_URL || 'http://localhost:7900'}/?autoconnect=true&resize=scale&password=${import.meta.env.VITE_VNC_PASSWORD || 'secret'}`} 
-                        className="w-full h-full border-0"
-                        title="Selenium VNC"
-                        allowFullScreen
-                    />
-                    
-                    {/* Overlay if not running */}
-                    {run?.status !== 'running' && run?.status !== 'queued' && (
-                        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-10 pointer-events-none">
-                            <div className="text-center p-6 bg-dark-surface/90 rounded-xl border border-white/10 shadow-2xl">
-                                <p className="text-xl font-bold text-white mb-2">Execution {run?.status}</p>
-                                <p className="text-slate-400 text-sm">Session ended.</p>
-                            </div>
-                        </div>
-                    )}
-                 </div>
+                 {/* Determine VNC URL based on connector (Hybrid Architecture) */}
+                 {(() => {
+                    return (
+                        <>
+                        <div className="w-full h-full bg-slate-900 rounded-lg overflow-hidden border border-slate-700 shadow-2xl relative">
+                            <iframe 
+                                src={vncUrl} 
+                                className="w-full h-full border-0"
+                                title={isLocalEvasion ? "Local Worker VNC" : "Selenium Grid VNC"}
+                                allowFullScreen
+                            />
+                            
+                            {/* Overlay if not running */}
+                            {run?.status !== 'running' && run?.status !== 'queued' && (
+                                <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-10 pointer-events-none">
+                                    <div className="text-center p-6 bg-dark-surface/90 rounded-xl border border-white/10 shadow-2xl">
+                                        <p className="text-xl font-bold text-white mb-2">Execution {run?.status}</p>
+                                        <p className="text-slate-400 text-sm">Session ended.</p>
+                                    </div>
+                                </div>
+                            )}
+                         </div>
 
-                 <p className="mt-2 text-xs text-slate-500">
-                    Viewing Selenium Grid Node (Port 7900)
-                 </p>
-            </div>
+                         <p className="mt-2 text-xs text-slate-500">
+                            Viewing: <span className="text-brand-400 font-bold">{isLocalEvasion ? 'Worker Display (Local Evasion)' : 'Selenium Grid (Standard)'}</span> • Port {vncPort}
+                         </p>
+                         </>
+                    );
+                 })()}
         </div>
+    </div>
     </div>
   );
 }

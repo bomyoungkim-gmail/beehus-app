@@ -245,10 +245,6 @@ class ItauOnshoreConnector(BaseConnector):
         except Exception as ss_e:
             await log_func(f"WARN Falha ao salvar screenshot: {ss_e}")
         
-        # Pausa para inspeção visual via VNC
-        await log_func("PAUSE Pausando por 120s para inspeção visual (erro)...")
-        await asyncio.sleep(120)
-        
         return self._error_result(run_id, error_msg)
     
     # ========== MÉTODO PRINCIPAL ==========
@@ -285,6 +281,24 @@ class ItauOnshoreConnector(BaseConnector):
         try:
             # ========== FLUXO PRINCIPAL ==========
             
+            # Resolve parameters
+            export_holdings = params.get('export_holdings', True)
+            export_history = params.get('export_history', False)
+            
+            # Initial Date Calculation (for registration robustness)
+            holdings_date = None
+            history_date = None
+            
+            if export_holdings:
+                from core.connectors.utils.date_calculator import calculate_holdings_date
+                holdings_date = calculate_holdings_date(params, output_format="%d/%m/%Y")
+            
+            if export_history:
+                from core.connectors.utils.date_calculator import calculate_history_date
+                history_date = calculate_history_date(params, output_format="%d/%m/%Y")
+
+            await log(f"DEBUG Params Resolved - Holdings: {export_holdings} ({holdings_date}), History: {export_history} ({history_date})")
+
             # 1. Navegação e Login
             await actions.navigate_to_login(SeletorItauOnshore.URL_BASE)
             await actions.open_more_access_modal()
@@ -299,48 +313,85 @@ class ItauOnshoreConnector(BaseConnector):
             await actions.submit_password()
             
             # 3. Navegação para Posição Diária
-            await actions.open_menu()
-            await actions.navigate_to_posicao_diaria()
+            if export_holdings:
+                 await actions.open_menu()
+                 await actions.navigate_to_posicao_diaria()
+                 await log(f"INFO Holdings date: {holdings_date}")
+                 await actions.set_report_date(holdings_date)
+                 await actions.export_holdings()
             
-            # 4. Configuração e Exportação de Relatório
-            business_day = await self._get_report_date(params, log)
-            await actions.set_report_date(business_day)
-            await actions.export_to_excel()
-            
-
-            # 5. Extrato (opcional)
-            extrato_period = await self._get_extrato_period(params, business_day, log)
-            if extrato_period:
-                await log("INFO Iniciando extrato...")
-                extrato_start, extrato_end = extrato_period
-
+            # 4. Export History (if enabled)
+            if export_history and history_date:
+                await log(f"INFO History date: {history_date}")
+                # For Itau, history needs start and end dates (same date for single day)
                 await actions.open_menu()
                 await actions.navigate_to_conta_corrente()
                 await actions.open_extrato()
-                # periodo personalizado
-                await actions.set_extrato_date_range(extrato_start, extrato_end)
+                await actions.set_extrato_date_range(history_date, history_date)
                 await actions.apply_extrato_filter()
-                await actions.export_extrato_excel()
+                await actions.export_history()
 
 
-            # ========== SUCESSO ==========
-            
-            # Save report date to run
+            # Save dates to run
             if run:
-                await run.update({"$set": {"report_date": business_day}})
-            
-            await log("OK Login success. Sleeping for 120s for visual verification...")
-            await asyncio.sleep(120)
+                update_data = {}
+                # Position Date
+                holdings_date = locals().get("holdings_date")
+                if holdings_date:
+                    update_data["report_date"] = holdings_date
+                
+                # History Date
+                history_date = locals().get("history_date")
+                if history_date:
+                     update_data["history_date"] = history_date
 
-            # 5. Logout
-            await actions.logout()            
+                if update_data:
+                    await run.update({"$set": update_data})
+            
+            await log("Sleeping for 10s for visual verification...")
+            await asyncio.sleep(10)
+
+            # 5. Logout (safe attempt)
+            try:
+                await actions.logout()
+            except Exception as e:
+                await log(f"WARN Logout failed (non-critical): {e}")
 
             return self._success_result(run_id, credentials.cpf)
             
         except Exception as e:
+            # Attempt to save dates if they were calculated before error
+            try:
+                if run:
+                    update_data = {}
+                    holdings_date = locals().get("holdings_date")
+                    history_date = locals().get("history_date")
+                    
+                    # Fallback for Itau if nothing calculated yet, try business_day
+                    if not holdings_date and not history_date:
+                         # Only set report_date (Position) as generic fallback
+                         update_data["report_date"] = self._get_business_day()
+                    else:
+                        if holdings_date:
+                            update_data["report_date"] = holdings_date
+                        if history_date:
+                            update_data["history_date"] = history_date
+                    
+                    if update_data:
+                        await run.update({"$set": update_data})
+            except Exception:
+                pass
 
-            # 5. Logout
-            await actions.logout()            
+            # Log error FIRST before trying to logout
+            await log(f"ERROR Exception caught: {e}")
+            import traceback
+            await log(f"ERROR Traceback: {traceback.format_exc()}")
+
+            # 5. Logout (safe attempt)
+            try:
+                await actions.logout()
+            except Exception as logout_e:
+                await log(f"WARN Logout failed: {logout_e}")
 
             return await self._handle_error(e, driver, run_id, log, credentials)
 

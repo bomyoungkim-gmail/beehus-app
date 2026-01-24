@@ -15,7 +15,8 @@ from core.schemas.messages import ScrapeResult
 from core.connectors.helpers.selenium_helpers import SeleniumHelpers
 from core.connectors.seletores.jefferies import SeletorJefferies
 from core.connectors.actions.jefferies_actions import JefferiesActions
-from core.utils.date_utils import get_previous_business_day, get_now, get_today
+from core.connectors.utils.date_calculator import calculate_holdings_date, calculate_history_date
+from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +136,6 @@ class JefferiesConnector(BaseConnector):
         except Exception as ss_e:
             await log_func(f"WARN Failed to save screenshot: {ss_e}")
 
-        await log_func("PAUSE Sleeping for 120s for visual inspection (error)...")
-        await asyncio.sleep(120)
-
         return self._error_result(run_id, error_msg)
 
     # ========== METODO PRINCIPAL ==========
@@ -162,7 +160,23 @@ class JefferiesConnector(BaseConnector):
         actions = self._create_actions(driver, log)
 
         try:
-            # ========== FLUXO PRINCIPAL ==========
+            # Resolve parameters
+            export_holdings = params.get("export_holdings", True)
+            export_history = params.get("export_history", False)
+            
+            # Initial Date Calculation
+            holdings_date = None
+            history_date = None
+            
+            if export_holdings:
+                from core.connectors.utils.date_calculator import calculate_holdings_date
+                holdings_date = calculate_holdings_date(params, output_format="%m/%d/%Y")
+            
+            if export_history:
+                from core.connectors.utils.date_calculator import calculate_history_date
+                history_date = calculate_history_date(params, output_format="%m/%d/%Y")
+            
+            await log(f"DEBUG Params Resolved - Holdings: {export_holdings} ({holdings_date}), History: {export_history} ({history_date})")
 
             # 1. Navegacao e Login
             await actions.navigate_to_login(SeletorJefferies.URL_BASE)
@@ -173,22 +187,49 @@ class JefferiesConnector(BaseConnector):
             await actions.wait_for_otp(timeout_seconds=240)
 
             # 2. Exportacoes
-            await actions.export_holdings()
-            await actions.export_history()
+            if export_holdings and holdings_date:
+                await actions.export_holdings(holdings_date)
+            
+            if export_history and history_date:
+                await actions.export_history(history_date)
 
-            # Save report date to run (Prior Close = D-1)
+            # Save report date to run
             if run:
-                report_date = self._get_business_day(region="US", state="NY", days=1, fmt="%m/%d/%Y")
-                await run.update({"$set": {"report_date": report_date}})
+                update_data = {}
+                holdings_date = locals().get("holdings_date")
+                history_date = locals().get("history_date")
 
-            await log("OK Login and exports completed. Sleeping for 120s for visual check.")
-            await asyncio.sleep(120)
+                if holdings_date:
+                    update_data["report_date"] = holdings_date
+                if history_date:
+                     update_data["history_date"] = history_date
+                
+                if update_data:
+                    await run.update({"$set": update_data})
+
+            await log("Sleeping for 10s for visual check.")
+            await asyncio.sleep(10)
 
             # 3. Logout
             await actions.logout()
             return self._success_result(run_id, credentials.username)
 
         except Exception as e:
+            # Attempt to save dates if they were calculated before error
+            try:
+                if run:
+                    update_data = {}
+                    holdings_date = locals().get("holdings_date")
+                    history_date = locals().get("history_date")
+                    if holdings_date:
+                        update_data["report_date"] = holdings_date
+                    if history_date:
+                        update_data["history_date"] = history_date
+                    if update_data:
+                        await run.update({"$set": update_data})
+            except Exception:
+                pass
+
             try:
                 await actions.logout()
             except Exception:

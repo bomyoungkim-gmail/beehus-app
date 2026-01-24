@@ -48,68 +48,37 @@ services:
 
   # --- Infrastructure ---
 
-  # Selenium Standalone (Consolidated)
+  # Selenium Grid (Restored for Standard Connectors)
   selenium:
     image: selenium/standalone-chrome:latest
-    restart: always
+    container_name: beehus-app-selenium-1 # Fixed name to avoid orphans
+    shm_size: 2g
     ports:
       - "4444:4444"
-      # VNC port kept open for now, controlled by password
-      - "7900:7900"
-    shm_size: 2g
-    environment:
-      - SE_NODE_MAX_SESSIONS=4
-      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
-      - SE_VNC_PASSWORD=${SE_VNC_PASSWORD:-secret}
-    volumes:
-      - ${USERPROFILE}/Downloads:/home/seluser/Downloads
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4444/wd/hub/status"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 10s
+      - "7900:7900" 
     networks:
       - scrape-net
 
-  # --- Application Services ---
-  
-  # API for Console/App
-  app-console:
-    build: .
-    # Production command (no reload)
-    command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-    env_file:
-      - .env
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      mongo:
-        condition: service_healthy
-    networks:
-      - scrape-net
-
-  # Celery Worker (replaces core-worker)
+  # Celery Worker (Local Execution + Evasion)
   celery-worker:
     build: .
-    command: celery -A django_config worker --loglevel=info --concurrency=4
+    # command: celery -A django_config worker --loglevel=info --concurrency=4
+    command: bash /app/scripts/start_worker_vnc.sh
     restart: unless-stopped
+    ports:
+      - "5901:5900"
+      - "7901:6901" # Host 7901 -> Worker NoVNC 6901 (JP Morgan Specific)
+    shm_size: 2g
     volumes:
       - .:/app
       - ./artifacts:/app/artifacts
+      - ${USERPROFILE}/Downloads:/downloads
     env_file:
       - .env
     depends_on:
       rabbitmq:
         condition: service_healthy
       mongo:
-        condition: service_healthy
-      selenium:
         condition: service_healthy
     networks:
       - scrape-net
@@ -142,6 +111,24 @@ services:
       - .env
     depends_on:
       - celery-worker
+    networks:
+      - scrape-net
+
+  app-console:
+    build: .
+    command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - scrape-net
 

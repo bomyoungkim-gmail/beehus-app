@@ -13,6 +13,11 @@ class SeletorBtgOffshore:
     PASSWORD = (By.CSS_SELECTOR, "input#password")
     SIGN_IN = (By.XPATH, "//button[normalize-space()='Sign in']")
     PORTAL_GLOBAL = (By.CSS_SELECTOR, "fieldset.login__external-link")
+    PORTAL_GLOBAL_ALT = (By.XPATH, "//p[normalize-space()='Portal Global']")
+    PORTAL_GLOBAL_CARD = (
+        By.XPATH,
+        "//a[.//span[normalize-space()='Portal Global'] or .//p[normalize-space()='Portal Global'] or .//*[normalize-space()='Portal Global']]",
+    )
 
     # OTP
     OTP_CODE = (By.ID, "code")
@@ -32,6 +37,7 @@ class SeletorBtgOffshore:
     MODAL_CLOSE_BUTTON = (By.CSS_SELECTOR, "button.orq-modal__close-button")
     MODAL_CLOSE = (By.CSS_SELECTOR, "button[aria-label='Close'], button.close, .icon-close")
     MODAL_SKIP = (By.XPATH, "//button[contains(normalize-space(), 'Skip') or contains(normalize-space(), 'Close')]")
+    GENERIC_OVERLAY = (By.CSS_SELECTOR, "div.overlay.ng-star-inserted, div.overlay")
 
     # Filters / export
     DATE_INPUT = (By.CSS_SELECTOR, "input[placeholder*='Data de']")

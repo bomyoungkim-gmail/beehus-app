@@ -114,6 +114,12 @@ class SeleniumHelpers:
             return self.wait.until(condition)
         return WebDriverWait(self.driver, timeout).until(condition)
 
+    def wait_ready_state(self, timeout_seconds: int = 30):
+        """Wait until document.readyState is complete."""
+        return WebDriverWait(self.driver, timeout_seconds).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+
 
     def _query_shadow_dom_css(self, selector: str):
         script = """

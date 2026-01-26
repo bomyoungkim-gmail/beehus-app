@@ -14,8 +14,10 @@ class SeletorJPMorgan:
 
     # MFA
     MFA_DROPDOWN = (By.ID, "simplerAuth-dropdownoptions-styledselect")
+    MFA_OPTION_SMS = (By.ID, "container-1-simplerAuth-dropdownoptions-styledselect")
     MFA_OPTION_DEFAULT = (By.ID, "container-3-simplerAuth-dropdownoptions-styledselect")
     MFA_NEXT = (By.ID, "requestIdentificationCode-sm")
+    MFA_NEXT_FALLBACK = (By.ID, "requestIdentificationCode")
     MFA_OTP_INPUT = (By.ID, "otpcode_input-input-field")
     MFA_PASSWORD_INPUT = (By.ID, "password_input-input-field")
     MFA_NEXT_AFTER_OTP = (By.ID, "log_on_to_landing_page-sm")

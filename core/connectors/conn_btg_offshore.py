@@ -164,13 +164,6 @@ class BtgOffshoreConnector(BaseConnector):
             # Resolve parameters
             export_holdings = params.get('export_holdings', True)
             export_history = params.get('export_history', False)
-            export_holdings_cayman = params.get('export_holdings_cayman', export_holdings)
-            export_history_cayman = (
-                params.get('export_history_cayman')
-                or params.get('export_extrato_cayman')
-                or params.get('extrato_cayman')
-                or export_history
-            )
 
             # Initial Date Calculation
             holdings_date_us = None
@@ -179,20 +172,13 @@ class BtgOffshoreConnector(BaseConnector):
             history_date_ky = None
 
             if export_holdings:
-                 from core.connectors.utils.date_calculator import calculate_holdings_date
-                 holdings_date_us = calculate_holdings_date(params, output_format="%m/%d/%Y")  # US format
+                from core.connectors.utils.date_calculator import calculate_holdings_date
+                holdings_date_us = calculate_holdings_date(params, output_format="%m/%d/%Y")  # US format
+                holdings_date_ky = calculate_holdings_date(params, output_format="%m/%d/%Y")
 
             if export_history:
-                 from core.connectors.utils.date_calculator import calculate_history_date
-                 history_date_us = calculate_history_date(params, output_format="%m/%d/%Y")  # US format
-                 
-            if export_holdings_cayman:
-                 from core.connectors.utils.date_calculator import calculate_holdings_date
-                 # Reuse utility but might need specific config if cayman differs? assuming params valid
-                 holdings_date_ky = calculate_holdings_date(params, output_format="%m/%d/%Y")
-
-            if export_history_cayman:
                 from core.connectors.utils.date_calculator import calculate_history_date
+                history_date_us = calculate_history_date(params, output_format="%m/%d/%Y")  # US format
                 history_date_ky = calculate_history_date(params, output_format="%m/%d/%Y")
 
             await log(f"DEBUG Params Resolved - Holdings US: {export_holdings} ({holdings_date_us}), History US: {export_history} ({history_date_us})")
@@ -210,27 +196,30 @@ class BtgOffshoreConnector(BaseConnector):
             await actions.select_country_us()
             await actions.select_all_accounts()
             await actions.submit_access()
-            await actions.dismiss_biometric_modal()
+            await actions.dismiss_modal_overlay("post-access")
 
-            # 3. Export Holdings (if enabled)
+            # 3. Export Holdings US (if enabled)
             if export_holdings and holdings_date_us:
                 await log(f"INFO Holdings date (US): {holdings_date_us}")
                 await actions.export_holdings(holdings_date_us)
 
-            # 4. Export History (if enabled)
+            # 4. Export History US (if enabled)
             if export_history and history_date_us:
                 await log(f"INFO History date (US): {history_date_us}")
                 await actions.export_history(history_date_us)
 
             # 4. Troca de custodia para Cayman
             await actions.change_custody_to_cayman()
+            await actions.select_all_accounts()
+            await actions.submit_access()
+            await actions.dismiss_modal_overlay("post-access")
 
             # 5. Exportacao Cayman (same pattern as US)
-            if export_holdings_cayman and holdings_date_ky:
+            if export_holdings and holdings_date_ky:
                 await log(f"INFO Holdings date (Cayman): {holdings_date_ky}")
                 await actions.export_holdings(holdings_date_ky)
 
-            if export_history_cayman and history_date_ky:
+            if export_history and history_date_ky:
                 await log(f"INFO History date (Cayman): {history_date_ky}")
                 await actions.export_history(history_date_ky)
 

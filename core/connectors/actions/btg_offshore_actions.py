@@ -44,6 +44,14 @@ class BtgOffshoreActions:
                 return True
         return False
 
+    def _find_first_visible(self, locators):
+        for loc in locators:
+            elements = self.driver.find_elements(*loc)
+            for el in elements:
+                if el.is_displayed() and el.is_enabled():
+                    return el
+        return None
+
     def _wait_enabled(self, locator, timeout: Optional[int] = None):
         el = self.helpers.find_element(*locator)
         self.helpers.wait_until(lambda d: el.is_displayed() and el.is_enabled(), timeout=timeout)
@@ -64,7 +72,19 @@ class BtgOffshoreActions:
     def _overlay_visible(self) -> bool:
         return self._is_visible(self.sel.MODAL_OVERLAY)
 
-    async def dismiss_modal_overlay(self, context: str = "") -> None:
+    def _wait_overlay_gone(self, timeout_seconds: int = 10) -> bool:
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if not self._overlay_visible():
+                return True
+            time.sleep(0.25)
+        return not self._overlay_visible()
+
+    async def dismiss_modal_overlay(self, context: str = "", wait_seconds: float = 0) -> None:
+        if wait_seconds > 0:
+            deadline = time.time() + wait_seconds
+            while time.time() < deadline and not self._overlay_visible():
+                time.sleep(0.25)
         if not self._overlay_visible():
             return
 
@@ -77,20 +97,19 @@ class BtgOffshoreActions:
 
             if self._click_if_visible(self.sel.DONT_SHOW_AGAIN):
                 await self.log("OK Dismissed modal (Don't show again)")
-            elif self._click_if_visible(self.sel.MODAL_CLOSE_BUTTON):
-                await self.log("OK Dismissed modal (Close button)")
             elif self._click_if_visible(self.sel.MODAL_CLOSE):
                 await self.log("OK Dismissed modal (Close icon/btn)")
+            elif self._click_if_visible(self.sel.MODAL_CLOSE_BUTTON):
+                await self.log("OK Dismissed modal (Close button)")
             elif self._click_if_visible(self.sel.MODAL_SKIP):
                 await self.log("OK Dismissed modal (Skip/Close text)")
-            else:
-                try:
-                    ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
-                    await self.log("OK Sent ESCAPE key to dismiss modal")
-                except Exception:
-                    pass
 
             time.sleep(1)
+
+        if self._overlay_visible():
+            if self._wait_overlay_gone():
+                await self.log("OK Modal overlay gone after close")
+                return
 
         if self._overlay_visible():
             overlays = self.driver.find_elements(*self.sel.MODAL_OVERLAY)
@@ -100,6 +119,9 @@ class BtgOffshoreActions:
                     time.sleep(1)
                 except Exception:
                     pass
+
+        if self._overlay_visible():
+            self._wait_overlay_gone()
 
         if self._overlay_visible():
             await self.log("WARN Modal overlay still visible after attempts")
@@ -112,9 +134,12 @@ class BtgOffshoreActions:
 
     async def click_portal_global(self) -> None:
         before_handles = set(self.driver.window_handles)
-        elements = self.driver.find_elements(*self.sel.PORTAL_GLOBAL)
-        for el in elements:
-            if el.is_displayed() and el.is_enabled():
+        deadline = time.time() + 12
+        while time.time() < deadline:
+            el = self._find_first_visible(
+                [self.sel.PORTAL_GLOBAL_CARD, self.sel.PORTAL_GLOBAL, self.sel.PORTAL_GLOBAL_ALT]
+            )
+            if el:
                 try:
                     el.click()
                 except Exception:
@@ -123,7 +148,14 @@ class BtgOffshoreActions:
                 self._switch_to_new_window(before_handles)
                 await self.log("OK Portal Global clicked")
                 return
-        await self.log("INFO Portal Global not visible, skipping")
+
+            if self._is_visible(self.sel.EMAIL):
+                await self.log("INFO Global login form visible, skipping Portal Global")
+                return
+
+            time.sleep(0.5)
+
+        await self.log("WARN Portal Global not visible after wait, continuing")
 
     def _switch_to_new_window(self, before_handles) -> None:
         try:
@@ -221,31 +253,7 @@ class BtgOffshoreActions:
         access_btn = self._wait_enabled(self.sel.ACCESS_BTN)
         access_btn.click()
         await self.log("OK Access submitted")
-
-    async def dismiss_biometric_modal(self) -> None:
-        """Dismisses any welcome/security modals."""
-        await self.dismiss_modal_overlay("post-access")
-
-        # Try specific "Don't show again"
-        if self._click_if_visible(self.sel.DONT_SHOW_AGAIN):
-            await self.log("OK Dismissed modal (Don't show again)")
-            return
-
-        # Try generic close/skip
-        if self._click_if_visible(self.sel.MODAL_CLOSE):
-            await self.log("OK Dismissed modal (Close icon/btn)")
-            return
-        
-        if self._click_if_visible(self.sel.MODAL_SKIP):
-            await self.log("OK Dismissed modal (Skip/Close text)")
-            return
-
-        # Try ESCAPE key
-        try:
-            ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
-            await self.log("OK Sent ESCAPE key to dismiss modal")
-        except Exception:
-            pass
+        await self.dismiss_modal_overlay("post-access", wait_seconds=6)
 
     # ========== FILTER / EXPORT ==========
 

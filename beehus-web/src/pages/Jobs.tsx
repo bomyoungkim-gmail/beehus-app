@@ -333,7 +333,6 @@ export default function Jobs() {
                                 <th className="px-6 py-4">View</th>
                                 <th className="px-6 py-4">Connector</th>
                                 <th className="px-6 py-4">Schedule</th>
-                                <th className="px-6 py-4">Schedule</th>
                                 <th className="px-6 py-4">Posição</th>
                                 <th className="px-6 py-4">Histórico</th>
                                 <th className="px-6 py-4">Status</th>

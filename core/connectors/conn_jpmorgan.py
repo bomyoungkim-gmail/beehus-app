@@ -157,20 +157,18 @@ class JPMorganConnector(BaseConnector):
 
             await log(f"DEBUG Params Resolved - Holdings: {export_holdings} ({holdings_date}), History: {export_history} ({history_date})")
 
-            await actions.navigate_to_login(
-                retries=int(params.get("login_redirect_retries", 2))
-            )
+            await actions.navigate_to_login(retries=2)
             await actions.fill_credentials(credentials.username, credentials.password)
             await actions.submit_login()
 
-            await actions.open_mfa_dropdown()
-            await actions.select_mfa_option(params.get("mfa_option_id"))
-            await actions.request_mfa_code()
-            await actions.confirm_mfa_login()
-
-            await actions.wait_for_login_complete(
-                timeout_seconds=int(params.get("mfa_timeout_seconds", 240))
-            )
+            mfa_timeout = 240
+            state = await actions.wait_for_login_or_mfa(timeout_seconds=60)
+            if state == "mfa":
+                await actions.handle_mfa_if_present(None, mfa_timeout)
+                await actions.wait_for_login_complete(timeout_seconds=mfa_timeout)
+            else:
+                # Already logged in or unknown; proceed to exports without MFA wait
+                await actions.wait_for_login_complete(timeout_seconds=60)
 
             # Export Holdings
             if export_holdings and holdings_date:

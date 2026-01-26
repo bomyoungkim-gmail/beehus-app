@@ -6,7 +6,7 @@ from selenium.webdriver.common.by import By
 class SeletorBtgMfo:
     """Selectors for the BTG MFO portal."""
 
-    URL_BASE = "https://www.btgpactual.com/home"
+    URL_BASE = "https://access.btgpactualdigital.com/login/externo"
 
     # Login
     LOGIN_FIELD = (By.CSS_SELECTOR, 'input[name="login"]')

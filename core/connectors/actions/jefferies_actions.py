@@ -76,7 +76,7 @@ class JefferiesActions:
         await self.log(f"NAVIGATE: {url}")
         self.driver.get(url)
         try:
-            self.helpers.wait_until(lambda d: d.execute_script("return document.readyState") == "complete")
+            self.helpers.wait_ready_state()
         except Exception:
             pass
 

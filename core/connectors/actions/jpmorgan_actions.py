@@ -39,6 +39,18 @@ class JPMorganActions:
         except Exception:
             pass
 
+    def _is_element_present(self, locator) -> bool:
+        try:
+            return len(self.driver.find_elements(*locator)) > 0
+        except Exception:
+            return False
+
+    def _is_mfa_page(self) -> bool:
+        url = (self.driver.current_url or "").lower()
+        if "simplerauth" in url or "recognizeuser" in url:
+            return True
+        return self._is_element_present(self.sel.MFA_DROPDOWN)
+
     def _build_container_user_agent(self) -> Optional[str]:
         caps = getattr(self.driver, "capabilities", {}) or {}
         version = caps.get("browserVersion") or caps.get("version")
@@ -284,18 +296,40 @@ class JPMorganActions:
         if option_id:
             self.helpers.click_element(By.ID, option_id)
         else:
-            self.helpers.click_element(*self.sel.MFA_OPTION_DEFAULT)
+            # Prefer SMS option when available
+            if self._is_element_present(self.sel.MFA_OPTION_SMS):
+                self.helpers.click_element(*self.sel.MFA_OPTION_SMS)
+            else:
+                self.helpers.click_element(*self.sel.MFA_OPTION_DEFAULT)
         await self.log("OK MFA option selected")
 
     async def request_mfa_code(self) -> None:
         await self.log("Requesting MFA code...")
-        self.helpers.click_element(*self.sel.MFA_NEXT)
+        try:
+            self.helpers.click_element(*self.sel.MFA_NEXT)
+        except Exception:
+            self.helpers.click_element(*self.sel.MFA_NEXT_FALLBACK)
         await self.log("OK MFA code requested")
 
-    async def confirm_mfa_login(self) -> None:
+    async def confirm_mfa_login(self, timeout_seconds: int = 240) -> None:
         await self.log("Waiting for user to fill OTP and password...")
-        self.helpers.wait_for_element(*self.sel.MFA_OTP_INPUT)
-        self.helpers.wait_for_element(*self.sel.MFA_PASSWORD_INPUT)
+        otp_el = self.helpers.wait_for_element(*self.sel.MFA_OTP_INPUT)
+        pwd_el = self.helpers.wait_for_element(*self.sel.MFA_PASSWORD_INPUT)
+
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        has_values = False
+        while asyncio.get_event_loop().time() < deadline:
+            otp_val = (otp_el.get_attribute("value") or "").strip()
+            pwd_val = (pwd_el.get_attribute("value") or "").strip()
+            if otp_val and pwd_val:
+                has_values = True
+                break
+            await asyncio.sleep(0.5)
+
+        if not has_values:
+            await self.log("WARN MFA fields not filled before timeout; not submitting")
+            return
+
         await self.log("Submitting MFA verification...")
         self.helpers.click_element(*self.sel.MFA_NEXT_AFTER_OTP)
         await self.log("OK MFA verification submitted")
@@ -310,6 +344,39 @@ class JPMorganActions:
             await self.log("OK MFA completed")
         except Exception as exc:
             raise RuntimeError("MFA timeout waiting for Investments menu.") from exc
+
+    async def handle_mfa_if_present(self, option_id: Optional[str], timeout_seconds: int) -> bool:
+        if not self._is_mfa_page():
+            await self.log("INFO MFA page not detected, skipping verification step")
+            return False
+
+        await self.open_mfa_dropdown()
+        await self.select_mfa_option(option_id)
+        await self.request_mfa_code()
+        await self.confirm_mfa_login(timeout_seconds=timeout_seconds)
+        return True
+
+    async def wait_for_login_or_mfa(self, timeout_seconds: int = 60) -> str:
+        await self.log(f"Waiting up to {timeout_seconds}s for MFA or login...")
+        try:
+            self.helpers.wait_until(
+                lambda d: (
+                    len(d.find_elements(*self.sel.MENU_INVESTMENTS)) > 0
+                    or self._is_mfa_page()
+                ),
+                timeout=timeout_seconds,
+            )
+        except Exception:
+            pass
+
+        if self._is_mfa_page():
+            await self.log("INFO MFA page detected")
+            return "mfa"
+        if self._is_element_present(self.sel.MENU_INVESTMENTS):
+            await self.log("INFO Logged-in page detected")
+            return "logged_in"
+        await self.log("WARN Neither MFA nor logged-in page detected, continuing")
+        return "unknown"
 
     async def open_investments_menu(self) -> None:
         await self.log("Opening Investments menu...")

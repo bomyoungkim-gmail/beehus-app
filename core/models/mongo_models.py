@@ -137,6 +137,7 @@ class Run(Document):
     """Individual execution of a job"""
     id: str = Field(default_factory=generate_uuid)
     job_id: Indexed(str)
+    job_name: Optional[str] = None
     connector: Optional[str] = None  # Connector name for display
     status: str = "queued"  # queued, running, success, failed
     attempt: int = 1

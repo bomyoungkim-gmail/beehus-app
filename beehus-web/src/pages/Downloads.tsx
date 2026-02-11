@@ -14,6 +14,7 @@ interface FileMetadata {
 interface DownloadItem {
     run_id: string;
     job_id: string;
+    job_name?: string;
     connector?: string;
     status: string;
     created_at: string;
@@ -89,7 +90,7 @@ export default function Downloads() {
                         <thead className="bg-white/5 text-slate-400 uppercase text-xs">
                             <tr>
                                 <th className="px-6 py-4">Date</th>
-                                <th className="px-6 py-4">Source</th>
+                                <th className="px-6 py-4">Job Name</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Original File</th>
                                 <th className="px-6 py-4">Processed File</th>
@@ -120,7 +121,7 @@ export default function Downloads() {
                                                     minute: '2-digit'
                                                 })}
                                             </td>
-                                            <td className="px-6 py-4 text-white">{item.connector || 'Unknown'}</td>
+                                            <td className="px-6 py-4 text-white">{item.job_name || 'Unknown'}</td>
                                             <td className="px-6 py-4">
                                                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusBadge(item.status)}`}>
                                                     {item.status === 'success' ? 'Ready' : item.status}

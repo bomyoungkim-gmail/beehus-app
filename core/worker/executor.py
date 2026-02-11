@@ -18,13 +18,14 @@ class SeleniumExecutor:
     - Local: Uses undetected-chromedriver (for JP Morgan evasion)
     - Remote: Uses Selenium Grid (for standard scraping)
     """
-    def __init__(self, use_local: bool = False):
+    def __init__(self, use_local: bool = False, download_dir: str = "/downloads"):
         """Initialize executor state and mode."""
         self.driver = None
         self.node_id = None
         self.node_uri = None
         self.vnc_url = None
         self.use_local = use_local
+        self.download_dir = download_dir
 
     def start(self):
         """Initializes the webdriver connection based on mode."""
@@ -48,7 +49,7 @@ class SeleniumExecutor:
         # chrome_options.add_argument("--headless") # Disabled to allow VNC visibility
 
         prefs = {
-            "download.default_directory": "/downloads",
+            "download.default_directory": self.download_dir,
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True,
@@ -71,6 +72,7 @@ class SeleniumExecutor:
                 for arg in chrome_options.arguments:
                     if "--headless" not in arg:
                         uc_options.add_argument(arg)
+                uc_options.add_experimental_option("prefs", prefs)
 
                 uc_options.add_argument("--no-sandbox")
                 uc_options.add_argument("--disable-dev-shm-usage")

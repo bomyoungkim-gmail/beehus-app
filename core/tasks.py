@@ -10,6 +10,7 @@ from core.services.file_manager import FileManager
 from core.connectors.registry import ConnectorRegistry
 from datetime import datetime
 import os
+import shutil
 from core.repositories import repo
 from core.models.mongo_models import Job, Run, Credential
 from core.db import init_db
@@ -111,6 +112,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
     async def _async_scrape():
         """Async implementation of the scraping task."""
         await init_db()
+        run_download_dir = None
         
         try:
             # Get run document
@@ -121,6 +123,11 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             
             # Fetch job to check for credentials
             job = await Job.get(job_id)
+            download_root = os.getenv("DOWNLOADS_DIR", "/downloads")
+            run_download_dir = os.path.join(download_root, run_id)
+            os.makedirs(run_download_dir, exist_ok=True)
+            if run and job and job.name:
+                await run.update({"$set": {"job_name": job.name}})
             
             # Prepare execution params
             execution_params = params.copy()
@@ -196,7 +203,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     heartbeat_task.cancel()
                     return {"success": False, "error": msg}
 
-            executor = SeleniumExecutor(use_local=use_local)
+            executor = SeleniumExecutor(use_local=use_local, download_dir=run_download_dir)
             executor.start()
             await log(f"🔌 Connected to Selenium Grid: {executor.driver.session_id}")
             if run:
@@ -230,8 +237,11 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     await log("📁 Checking for downloaded files...")
                     try:
                         # Capture files from downloads
-                        download_pattern = params_with_context.get("download_pattern", "*.xls*")
-                        original_paths = FileManager.capture_downloads(run_id, pattern=download_pattern)
+                        original_paths = FileManager.capture_downloads(
+                            run_id,
+                            pattern="*",
+                            source_dir=run_download_dir,
+                        )
                         
                         if original_paths:
                             # Extract metadata for processed naming
@@ -311,6 +321,13 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             logger.exception(f"❌ Scrape task exception: {e}")
             await repo.save_run_status(run_id, "failed", str(e))
             raise
+        finally:
+            if run_download_dir and os.path.isdir(run_download_dir):
+                try:
+                    shutil.rmtree(run_download_dir, ignore_errors=True)
+                    logger.info(f"🧹 Removed run download dir: {run_download_dir}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Could not remove run download dir {run_download_dir}: {cleanup_error}")
     
     # Use existing event loop or create new one if needed
     try:
@@ -436,7 +453,13 @@ def scheduled_job_runner(self, job_id: str):
             return
         
         # Create run
-        run = Run(job_id=job_id, connector=job.connector, status="queued", logs=["[System] Scheduled execution"])
+        run = Run(
+            job_id=job_id,
+            job_name=job.name,
+            connector=job.connector,
+            status="queued",
+            logs=["[System] Scheduled execution"],
+        )
         await run.save()
         
         logger.info(f"📅 Scheduled job triggered: {job_id}, run: {run.id}")

@@ -51,7 +51,12 @@ class FileManager:
             return path.name
 
     @staticmethod
-    def capture_download(run_id: str, pattern: str = "*.xlsx", timeout_seconds: int = 30) -> Optional[str]:
+    def capture_download(
+        run_id: str,
+        pattern: str = "*.xlsx",
+        timeout_seconds: int = 30,
+        source_dir: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Capture a downloaded file from the downloads directory.
 
@@ -67,7 +72,7 @@ class FileManager:
 
         start_time = time.time()
         found_file = None
-        downloads_dir = FileManager._downloads_dir()
+        downloads_dir = Path(source_dir) if source_dir else FileManager._downloads_dir()
 
         while time.time() - start_time < timeout_seconds:
             files = glob.glob(str(downloads_dir / pattern))
@@ -98,7 +103,12 @@ class FileManager:
             return None
 
     @staticmethod
-    def capture_downloads(run_id: str, pattern: str = "*.xlsx", timeout_seconds: int = 30) -> List[str]:
+    def capture_downloads(
+        run_id: str,
+        pattern: str = "*.xlsx",
+        timeout_seconds: int = 30,
+        source_dir: Optional[str] = None,
+    ) -> List[str]:
         """
         Capture all downloaded files from the downloads directory.
 
@@ -109,7 +119,7 @@ class FileManager:
 
         start_time = time.time()
         captured: List[str] = []
-        downloads_dir = FileManager._downloads_dir()
+        downloads_dir = Path(source_dir) if source_dir else FileManager._downloads_dir()
 
         while time.time() - start_time < timeout_seconds:
             files = glob.glob(str(downloads_dir / pattern))

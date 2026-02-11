@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import logging
 import os
 
-from core.models.mongo_models import Run
+from core.models.mongo_models import Job, Run
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ class DownloadItem(BaseModel):
 
     run_id: str
     job_id: str
+    job_name: Optional[str]
     connector: Optional[str]
     status: str
     created_at: str
@@ -92,10 +93,16 @@ async def list_downloads(
         items = []
         for run in runs:
             normalized_files = [_file_meta_to_dict(f) for f in (run.files or [])]
+            job_name = run.job_name
+            if not job_name and run.job_id:
+                job = await Job.get(run.job_id)
+                if job:
+                    job_name = job.name
             items.append(
                 DownloadItem(
                     run_id=run.id,
                     job_id=run.job_id,
+                    job_name=job_name or run.connector or "Unknown",
                     connector=run.connector,
                     status=run.status,
                     created_at=run.created_at.isoformat(),

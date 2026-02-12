@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import Layout from '../components/Layout';
+import { formatDateTime } from '../utils/datetime';
 import { useAuth } from '../context/AuthContext';
 
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -77,11 +78,11 @@ export default function UserProfile() {
             </div>
             <div>
               <p className="text-xs uppercase text-slate-500">Created</p>
-              <p>{user?.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}</p>
+              <p>{user?.created_at ? formatDateTime(user.created_at) : 'N/A'}</p>
             </div>
             <div>
               <p className="text-xs uppercase text-slate-500">Last Login</p>
-              <p>{user?.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</p>
+              <p>{user?.last_login ? formatDateTime(user.last_login) : 'Never'}</p>
             </div>
           </div>
         </div>

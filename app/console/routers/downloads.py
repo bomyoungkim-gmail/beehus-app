@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 import logging
 import os
@@ -63,6 +64,18 @@ def _resolve_artifact_path(relative_path: str) -> Path:
     return candidate
 
 
+def _to_iso8601_utc(value: datetime) -> str:
+    """
+    Return a timezone-aware ISO-8601 UTC string.
+    Handles legacy naive datetimes by assuming they are UTC.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
+
+
 @router.get("/", response_model=List[DownloadItem])
 async def list_downloads(
     status: Optional[str] = None,
@@ -105,7 +118,7 @@ async def list_downloads(
                     job_name=job_name or run.connector or "Unknown",
                     connector=run.connector,
                     status=run.status,
-                    created_at=run.created_at.isoformat(),
+                    created_at=_to_iso8601_utc(run.created_at),
                     files=[FileMetadata(**f) for f in normalized_files],
                 )
             )

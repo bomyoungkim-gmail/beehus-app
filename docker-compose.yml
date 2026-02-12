@@ -190,7 +190,9 @@ services:
     ports:
       - "5173:5173"  # Same port inside/outside - no confusion!
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_VNC_URL_BASE=${VITE_VNC_URL_BASE:-http://localhost}
+      - VITE_VNC_PASSWORD=${VITE_VNC_PASSWORD:-secret}
     depends_on:
       - app-console
     networks:

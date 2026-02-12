@@ -4,6 +4,7 @@ Handles capture, renaming, and processing of files from Selenium downloads.
 """
 
 import glob
+import hashlib
 import logging
 import os
 import re
@@ -37,6 +38,36 @@ class FileManager:
         return clean or fallback
 
     @staticmethod
+    def _file_signature(file_path: str, hash_bytes: int = 65536) -> Optional[tuple[int, int, str]]:
+        """
+        Build a lightweight signature for change detection.
+        Returns (size_bytes, mtime_ns, sha1_prefix) or None if unavailable.
+        """
+        try:
+            stat = os.stat(file_path)
+            size = int(stat.st_size)
+            mtime_ns = int(stat.st_mtime_ns)
+            sha1 = hashlib.sha1()
+            with open(file_path, "rb") as fh:
+                sha1.update(fh.read(hash_bytes))
+            return (size, mtime_ns, sha1.hexdigest())
+        except Exception:
+            return None
+
+    @staticmethod
+    def build_file_signatures(
+        absolute_paths: set[str],
+        hash_bytes: int = 65536,
+    ) -> dict[str, tuple[int, int, str]]:
+        """Build signatures map for a set of absolute file paths."""
+        signatures: dict[str, tuple[int, int, str]] = {}
+        for path in absolute_paths:
+            sig = FileManager._file_signature(path, hash_bytes=hash_bytes)
+            if sig:
+                signatures[os.path.abspath(path)] = sig
+        return signatures
+
+    @staticmethod
     def to_artifact_relative(file_path: str) -> str:
         """
         Convert an absolute file path under artifacts root to relative POSIX path.
@@ -57,6 +88,8 @@ class FileManager:
         timeout_seconds: int = 30,
         source_dir: Optional[str] = None,
         exclude_paths: Optional[set[str]] = None,
+        min_modified_time: Optional[float] = None,
+        preexisting_signatures: Optional[dict[str, tuple[int, int, str]]] = None,
     ) -> Optional[str]:
         """
         Capture a downloaded file from the downloads directory.
@@ -84,7 +117,24 @@ class FileManager:
                 if (
                     os.path.isfile(f)
                     and not f.endswith((".crdownload", ".tmp", ".part"))
-                    and os.path.abspath(f) not in excluded
+                    and (
+                        os.path.abspath(f) not in excluded
+                        or (
+                            min_modified_time is not None
+                            and os.path.getmtime(f) >= min_modified_time
+                        )
+                        or (
+                            preexisting_signatures is not None
+                            and (
+                                FileManager._file_signature(f)
+                                != preexisting_signatures.get(os.path.abspath(f))
+                            )
+                        )
+                    )
+                    and (
+                        min_modified_time is None
+                        or os.path.getmtime(f) >= min_modified_time
+                    )
                 )
             ]
 
@@ -130,6 +180,8 @@ class FileManager:
         timeout_seconds: int = 30,
         source_dir: Optional[str] = None,
         exclude_paths: Optional[set[str]] = None,
+        min_modified_time: Optional[float] = None,
+        preexisting_signatures: Optional[dict[str, tuple[int, int, str]]] = None,
     ) -> List[str]:
         """
         Capture all downloaded files from the downloads directory.
@@ -152,7 +204,24 @@ class FileManager:
                 if (
                     os.path.isfile(f)
                     and not f.endswith((".crdownload", ".tmp", ".part"))
-                    and os.path.abspath(f) not in excluded
+                    and (
+                        os.path.abspath(f) not in excluded
+                        or (
+                            min_modified_time is not None
+                            and os.path.getmtime(f) >= min_modified_time
+                        )
+                        or (
+                            preexisting_signatures is not None
+                            and (
+                                FileManager._file_signature(f)
+                                != preexisting_signatures.get(os.path.abspath(f))
+                            )
+                        )
+                    )
+                    and (
+                        min_modified_time is None
+                        or os.path.getmtime(f) >= min_modified_time
+                    )
                 )
             ]
 

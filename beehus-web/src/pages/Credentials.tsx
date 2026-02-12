@@ -9,6 +9,7 @@ import ConfirmModal from "../components/ui/ConfirmModal";
 import { useToast } from "../context/ToastContext";
 import { processorsApi } from "../api/processors";
 import type { Processor } from "../api/processors";
+import { formatDate, formatDateTime } from "../utils/datetime";
 
 interface Credential {
   id: string;
@@ -347,7 +348,7 @@ export default function Credentials() {
                       {getWorkspaceName(cred.workspace_id)}
                     </td>
                     <td className="px-6 py-4 text-slate-400 text-xs">
-                      {new Date(cred.created_at).toLocaleDateString()}
+                      {formatDate(cred.created_at)}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center space-x-3">
@@ -833,7 +834,7 @@ for file_path in Path(original_dir).glob('*.xlsx'):
                             )}
                           </div>
                           <div className="text-xs text-slate-500 mt-1">
-                            Created: {new Date(proc.created_at).toLocaleString()}
+                            Created: {formatDateTime(proc.created_at)}
                           </div>
                         </div>
                         <button

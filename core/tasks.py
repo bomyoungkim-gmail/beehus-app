@@ -114,6 +114,8 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
         job = None
         run_download_dir = None
         download_exclude_paths: set[str] = set()
+        download_scan_start_ts: float | None = None
+        download_exclude_signatures: dict[str, tuple[int, int, str]] = {}
 
         try:
             # Get run document
@@ -256,6 +258,14 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             run_download_dir = os.path.join(download_root, run_id)
             os.makedirs(run_download_dir, exist_ok=True)
             try:
+                # Shared folder may be created by root in worker while browser runs as seluser.
+                # Keep it writable to avoid Chrome fallback to profile downloads and Save As flows.
+                os.chmod(run_download_dir, 0o777)
+            except Exception as chmod_error:
+                logger.warning("Could not chmod run download dir %s: %s", run_download_dir, chmod_error)
+            # Use run start timestamp so overwritten files with same name are still captured.
+            download_scan_start_ts = get_now().timestamp()
+            try:
                 # Snapshot files that already existed before this run starts.
                 preexisting_run_files = set()
                 if os.path.isdir(run_download_dir):
@@ -272,15 +282,16 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                             preexisting_root_files.add(os.path.abspath(candidate))
 
                 download_exclude_paths = preexisting_run_files | preexisting_root_files
+                from core.services.file_manager import FileManager
+                download_exclude_signatures = FileManager.build_file_signatures(
+                    download_exclude_paths
+                )
             except Exception as snapshot_error:
                 logger.warning("Failed to snapshot preexisting downloads: %s", snapshot_error)
             await log(f"Session download dir: {run_download_dir}")
 
-            # IMPORTANT: For remote Selenium Grid, Chrome nodes only have /downloads mounted.
-            # They cannot access /downloads/<run_id> subdirectories.
-            # Use base download_root for Chrome configuration, FileManager will handle
-            # filtering via exclude_paths and fallback logic.
-            chrome_download_dir = download_root if not use_local else run_download_dir
+            # Strong isolation: each run gets its own browser download directory.
+            chrome_download_dir = run_download_dir
             
             executor = SeleniumExecutor(use_local=use_local, download_dir=chrome_download_dir)
             executor.start()
@@ -328,6 +339,8 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                         timeout_seconds=30,
                         source_dir=run_download_dir,
                         exclude_paths=download_exclude_paths,
+                        min_modified_time=download_scan_start_ts,
+                        preexisting_signatures=download_exclude_signatures,
                     )
 
                     if original_paths:

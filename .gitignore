@@ -30,6 +30,3 @@ ai/
 # Artifacts
 artifacts/*.log
 artifacts/*.png
-
-# Scripts
-scripts/create_admin_user.py

@@ -13,9 +13,21 @@ services:
     ports:
       - "6379:6379"
 
-  # Enable reload for local development
+  # Enable reload + bind mount for local development
   app-console:
     command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+
+  celery-worker:
+    volumes:
+      - .:/app
+      - ./artifacts:/app/artifacts
+      - ${DOWNLOADS_DIR:-./downloads}:/downloads
+
+  celery-beat:
+    volumes:
+      - .:/app
 
   # Disable frontend - run natively on Windows instead
   frontend:

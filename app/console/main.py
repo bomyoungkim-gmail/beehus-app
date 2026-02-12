@@ -97,12 +97,13 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="App Console - Beehus Platform", lifespan=lifespan)
 
 # CORS
+_extra_origins = os.getenv("CORS_ORIGINS", "")
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-]
+] + [o.strip() for o in _extra_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,

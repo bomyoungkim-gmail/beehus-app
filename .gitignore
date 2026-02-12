@@ -5,12 +5,13 @@ __pycache__/
 .venv/
 venv/
 ENV/
-env/
+.env/
 
 # Node
 node_modules/
 dist/
 build/
+.env
 
 # IDE/System
 .vscode/
@@ -28,5 +29,4 @@ ai/
 .llm.md
 
 # Artifacts
-artifacts/*.log
-artifacts/*.png
+artifacts/

@@ -21,7 +21,7 @@ x-chrome-node: &chrome-node
   depends_on:
     - selenium-hub
   volumes:
-    - ${USERPROFILE}/Downloads:/downloads
+    - ${DOWNLOADS_DIR:-./downloads}:/downloads
   networks:
     - scrape-net
   healthcheck:
@@ -116,7 +116,7 @@ services:
     volumes:
       - .:/app
       - ./artifacts:/app/artifacts
-      - ${USERPROFILE}/Downloads:/downloads
+      - ${DOWNLOADS_DIR:-./downloads}:/downloads
     env_file:
       - .env
     depends_on:

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import Layout from '../components/Layout';
+import { formatDateTime } from '../utils/datetime';
 
 interface User {
   id: string;
@@ -197,7 +198,7 @@ export default function Users() {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-slate-400">
-                      {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
+                      {user.last_login ? formatDateTime(user.last_login) : 'Never'}
                     </td>
                     <td className="px-6 py-4 space-x-2">
                       <button

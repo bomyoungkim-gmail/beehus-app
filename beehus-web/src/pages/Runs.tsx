@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
+import { formatDateTime } from '../utils/datetime';
 
 interface Run {
     run_id: string;
@@ -258,7 +259,7 @@ export default function Runs() {
                                 runs.map((run) => (
                                     <tr key={run.run_id} className="hover:bg-white/5 transition-colors">
                                         <td className="px-6 py-4 text-slate-300">
-                                            {run.created_at ? new Date(run.created_at).toLocaleString('pt-BR', {
+                                            {run.created_at ? formatDateTime(run.created_at, {
                                                 day: '2-digit',
                                                 month: '2-digit',
                                                 year: 'numeric',

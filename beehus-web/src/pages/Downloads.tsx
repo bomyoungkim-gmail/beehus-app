@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import axios from 'axios';
 import { useToast } from '../context/ToastContext';
+import { formatDateTime } from '../utils/datetime';
 
 interface FileMetadata {
     file_type: string;
@@ -79,6 +80,16 @@ export default function Downloads() {
         return `${(kb / 1024).toFixed(1)} MB`;
     };
 
+    const formatRunDate = (createdAt: string) => {
+        return formatDateTime(createdAt, {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    };
+
     return (
         <Layout>
             <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -115,13 +126,7 @@ export default function Downloads() {
                                     return (
                                         <tr key={item.run_id} className="hover:bg-white/5 transition-colors">
                                             <td className="px-6 py-4 text-slate-300">
-                                                {new Date(item.created_at).toLocaleString('pt-BR', {
-                                                    day: '2-digit',
-                                                    month: '2-digit',
-                                                    year: 'numeric',
-                                                    hour: '2-digit',
-                                                    minute: '2-digit'
-                                                })}
+                                                {formatRunDate(item.created_at)}
                                             </td>
                                             <td className="px-6 py-4 text-white">{item.job_name || 'Unknown'}</td>
                                             <td className="px-6 py-4">

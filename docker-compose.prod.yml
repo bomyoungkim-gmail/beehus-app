@@ -8,24 +8,16 @@ services:
     container_name: beehus-app-frontend-prod
     restart: unless-stopped
     ports:
-      - "5173:80"
+      - "3000:80"
     volumes:
       - ./beehus-web/dist:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./beehus-web/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - app-console
     networks:
       - scrape-net
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+    command: ["nginx", "-g", "daemon off;"]
 
-  # Disable Flower in production (already commented in base compose)
-  # No changes needed - already disabled in docker-compose.yml
-
-  # Production-optimized worker (optional: can reduce shm_size if not using VNC)
+  # Production-optimized worker
   celery-worker:
-    shm_size: 1g  # Reduced from 2g (VNC not typically needed in prod)
+    shm_size: 1g

@@ -30,3 +30,9 @@ ai/
 
 # Artifacts
 artifacts/
+
+# EC2 backups
+.env.backup*
+.env.clean
+docker-compose.yml.backup
+docker-compose.yml.dev

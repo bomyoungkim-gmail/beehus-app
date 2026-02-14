@@ -6,18 +6,17 @@ Replaces the custom aio_pika worker implementation.
 from celery import Task
 from django_config import celery_app
 from core.worker.executor import SeleniumExecutor
-from core.services.file_manager import FileManager
 from core.connectors.registry import ConnectorRegistry
-from datetime import datetime
-import os
-import shutil
 from core.repositories import repo
 from core.models.mongo_models import Job, Run, Credential
 from core.db import init_db
 from core.security import decrypt_value
 from core.config import settings
+import os
+import shutil
 import asyncio
 import logging
+from datetime import datetime
 from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -112,41 +111,16 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
     async def _async_scrape():
         """Async implementation of the scraping task."""
         await init_db()
+        job = None
         run_download_dir = None
-        
+        download_exclude_paths: set[str] = set()
+
         try:
             # Get run document
             run = await Run.get(run_id)
             if not run:
                  logger.error(f"Run {run_id} not found")
                  return
-            
-            # Fetch job to check for credentials
-            job = await Job.get(job_id)
-            download_root = os.getenv("DOWNLOADS_DIR", "/downloads")
-            run_download_dir = os.path.join(download_root, run_id)
-            os.makedirs(run_download_dir, exist_ok=True)
-            if run and job and job.name:
-                await run.update({"$set": {"job_name": job.name}})
-            
-            # Prepare execution params
-            execution_params = params.copy()
-            
-            # Resolve and inject credentials if available
-            if job and job.credential_id:
-                credential = await Credential.get(job.credential_id)
-                if credential:
-                    execution_params["username"] = credential.username
-                    decrypted_password = decrypt_value(credential.encrypted_password)
-                    execution_params["password"] = decrypted_password
-                    
-                    # Inject extended metadata (agencia, conta, etc.)
-                    if credential.metadata:
-                        execution_params.update(credential.metadata)
-                    if not decrypted_password:
-                        logger.error(f"Credential decryption failed for job {job_id}")
-                else:
-                    logger.warning(f"Credential {job.credential_id} not found for job {job_id}")
             
             async def log(msg):
                 """Write a message to logs and the run document."""
@@ -155,6 +129,81 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     # Atomic push to logs to avoid overwriting status
                     timestamped_msg = f"[{get_now().time()}] {msg}"
                     await run.update({"$push": {"logs": timestamped_msg}})
+            
+            # Fetch job to check for credentials
+            job = await Job.get(job_id)
+
+            if run and job and job.name:
+                await run.update({"$set": {"job_name": job.name}})
+            
+            # Prepare execution params
+            execution_params = params.copy()
+
+            # Resolve and inject credentials if available.
+            # Fallback path supports legacy jobs saved without credential_id.
+            credential = None
+            credential_from_link = False
+
+            if not job:
+                await log(f"⚠️ Job {job_id} not found; running with provided params only")
+            else:
+                linked_credential_id = (job.credential_id or "").strip()
+                if linked_credential_id:
+                    credential = await Credential.get(linked_credential_id)
+                    credential_from_link = True
+                    if not credential:
+                        await log(
+                            f"⚠️ Credential {linked_credential_id} not found for job {job_id};"
+                            " trying legacy fallback by username"
+                        )
+
+                # Legacy fallback for old jobs with empty credential_id.
+                if not credential:
+                    username_hint = (
+                        execution_params.get("username")
+                        or execution_params.get("user")
+                        or ""
+                    ).strip()
+                    if username_hint:
+                        credential = await Credential.find_one(
+                            Credential.workspace_id == job.workspace_id,
+                            Credential.username == username_hint,
+                        )
+                        if credential:
+                            await job.update({"$set": {"credential_id": credential.id}})
+                            job.credential_id = credential.id
+                            await log(
+                                "🔗 Auto-linked job credential by username/workspace match:"
+                                f" credential_id={credential.id}"
+                            )
+
+            if credential:
+                if credential_from_link:
+                    # Explicitly linked credentials are source of truth.
+                    execution_params["username"] = credential.username
+                    decrypted_password = decrypt_value(credential.encrypted_password)
+                    if decrypted_password:
+                        execution_params["password"] = decrypted_password
+                    else:
+                        await log(
+                            f"⚠️ Credential password decryption failed for credential {credential.id}"
+                        )
+                else:
+                    # Fallback mode: keep manual values if present, fill only gaps.
+                    execution_params.setdefault("username", credential.username)
+                    if not (execution_params.get("password") or execution_params.get("pass")):
+                        decrypted_password = decrypt_value(credential.encrypted_password)
+                        if decrypted_password:
+                            execution_params["password"] = decrypted_password
+
+                metadata = credential.metadata if isinstance(credential.metadata, dict) else {}
+                if metadata:
+                    execution_params.update(metadata)
+                    await log(
+                        f"🔑 Injected credential metadata keys: {sorted(metadata.keys())}"
+                    )
+            else:
+                await log("ℹ️ No credential metadata injected for this run")
 
             # Heartbeat loop
             async def heartbeat_loop():
@@ -203,13 +252,44 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     heartbeat_task.cancel()
                     return {"success": False, "error": msg}
 
-            executor = SeleniumExecutor(use_local=use_local, download_dir=run_download_dir)
+            download_root = os.getenv("DOWNLOADS_DIR", "/downloads")
+            run_download_dir = os.path.join(download_root, run_id)
+            os.makedirs(run_download_dir, exist_ok=True)
+            try:
+                # Snapshot files that already existed before this run starts.
+                preexisting_run_files = set()
+                if os.path.isdir(run_download_dir):
+                    for name in os.listdir(run_download_dir):
+                        candidate = os.path.join(run_download_dir, name)
+                        if os.path.isfile(candidate):
+                            preexisting_run_files.add(os.path.abspath(candidate))
+
+                preexisting_root_files = set()
+                if os.path.isdir(download_root):
+                    for name in os.listdir(download_root):
+                        candidate = os.path.join(download_root, name)
+                        if os.path.isfile(candidate):
+                            preexisting_root_files.add(os.path.abspath(candidate))
+
+                download_exclude_paths = preexisting_run_files | preexisting_root_files
+            except Exception as snapshot_error:
+                logger.warning("Failed to snapshot preexisting downloads: %s", snapshot_error)
+            await log(f"Session download dir: {run_download_dir}")
+
+            # IMPORTANT: For remote Selenium Grid, Chrome nodes only have /downloads mounted.
+            # They cannot access /downloads/<run_id> subdirectories.
+            # Use base download_root for Chrome configuration, FileManager will handle
+            # filtering via exclude_paths and fallback logic.
+            chrome_download_dir = download_root if not use_local else run_download_dir
+            
+            executor = SeleniumExecutor(use_local=use_local, download_dir=chrome_download_dir)
             executor.start()
             await log(f"🔌 Connected to Selenium Grid: {executor.driver.session_id}")
             if run:
                 if executor.vnc_url:
                     await run.update({"$set": {"vnc_url": executor.vnc_url}})
             
+            result_payload = None
             try:
                 # Add context to params
                 params_with_context = {
@@ -218,93 +298,84 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     "job_id": job_id,
                     "workspace_id": workspace_id
                 }
-                
+
                 # Execute connector
                 await log("🚀 Executing connector logic...")
                 result = await connector.scrape(executor.driver, params_with_context)
-                
+
                 # Save results
                 if result.success:
                     await repo.save_run_status(run_id, "success")
                     if result.data:
                         await repo.save_raw_payload(
-                            run_id, 
-                            result.data.get('url', 'unknown'), 
+                            run_id,
+                            result.data.get('url', 'unknown'),
                             str(result.data)
                         )
-                    
-                    # Capture and process downloaded files
-                    await log("📁 Checking for downloaded files...")
-                    try:
-                        # Capture files from downloads
-                        original_paths = FileManager.capture_downloads(
-                            run_id,
-                            pattern="*",
-                            source_dir=run_download_dir,
-                        )
-                        
-                        if original_paths:
-                            # Extract metadata for processed naming
-                            job = await Job.get(job_id)
-                            metadata = {
-                                'bank': connector_name.replace('conn_', '').replace('_', ' ').title(),
-                                'account': params_with_context.get('conta', params_with_context.get('account', '0000')),
-                                'date': datetime.now().strftime('%d%m%Y')
-                            }
-                            
-                            files_metadata = []
-                            for idx, original_path in enumerate(original_paths, start=1):
-                                suffix = str(idx) if len(original_paths) > 1 else ""
 
-                                # Rename original file to standardized output name
-                                renamed_original = FileManager.rename_file(
-                                    original_path,
-                                    metadata,
-                                    suffix=suffix
-                                ) or original_path
-
-                                # Process file to standardized output name
-                                processed_path = FileManager.process_file(
-                                    renamed_original,
-                                    run_id,
-                                    metadata,
-                                    suffix=suffix
-                                )
-                                
-                                files_metadata.append({
-                                    'file_type': 'original',
-                                    'filename': os.path.basename(renamed_original),
-                                    'path': FileManager.to_artifact_relative(renamed_original),
-                                    'size_bytes': FileManager.get_file_size(renamed_original),
-                                    'status': 'ready'
-                                })
-                                
-                                if processed_path:
-                                    files_metadata.append({
-                                        'file_type': 'processed',
-                                        'filename': os.path.basename(processed_path),
-                                        'path': FileManager.to_artifact_relative(processed_path),
-                                        'size_bytes': FileManager.get_file_size(processed_path),
-                                        'status': 'ready'
-                                    })
-                            
-                            if files_metadata:
-                                await run.update({"$set": {"files": files_metadata}})
-                                await log(f"✅ Files captured: {len(files_metadata)} file(s)")
-                        else:
-                            await log("ℹ️  No files downloaded")
-                    
-                    except Exception as file_error:
-                        await log(f"⚠️  File processing error: {file_error}")
-                        # Don't fail the job if file processing fails
-                    
-                    await log(f"✅ Scrape successful")
+                    await log("✅ Scrape successful")
                 else:
                     await repo.save_run_status(run_id, "failed", result.error)
                     await log(f"❌ Scrape failed: {result.error}")
-                
-                return result.dict() if hasattr(result, 'dict') else {"success": result.success, "data": result.data}
-                
+
+                await log("Checking for downloaded files...")
+                try:
+                    from core.services.file_manager import FileManager
+
+                    original_paths = FileManager.capture_downloads(
+                        run_id,
+                        pattern="*",
+                        timeout_seconds=30,
+                        source_dir=run_download_dir,
+                        exclude_paths=download_exclude_paths,
+                    )
+
+                    if original_paths:
+                        metadata = {
+                            "bank": connector_name.replace("conn_", "").replace("_", " ").title(),
+                            "account": (
+                                params_with_context.get("conta")
+                                or params_with_context.get("conta_corrente")
+                                or params_with_context.get("account")
+                                or "0000"
+                            ),
+                            "date": datetime.now().strftime("%d%m%Y"),
+                        }
+
+                        files_metadata = []
+                        for idx, original_path in enumerate(original_paths, start=1):
+                            suffix = str(idx) if len(original_paths) > 1 else ""
+
+                            renamed_original = (
+                                FileManager.rename_file(original_path, metadata, suffix=suffix)
+                                or original_path
+                            )
+
+                            files_metadata.append(
+                                {
+                                    "file_type": "original",
+                                    "filename": os.path.basename(renamed_original),
+                                    "path": FileManager.to_artifact_relative(renamed_original),
+                                    "size_bytes": FileManager.get_file_size(renamed_original),
+                                    "status": "ready",
+                                }
+                            )
+
+                        if files_metadata:
+                            await run.update({"$set": {"files": files_metadata}})
+                            await log(f"Files captured: {len(files_metadata)} original file(s)")
+                    else:
+                        await log("No files downloaded")
+
+                except Exception as file_error:
+                    await log(f"File capture error: {file_error}")
+
+                result_payload = (
+                    result.dict()
+                    if hasattr(result, "dict")
+                    else {"success": result.success, "data": result.data}
+                )
+
             finally:
                 heartbeat_task.cancel()
                 try:
@@ -315,19 +386,68 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 executor.stop()
                 if slot_token:
                     await _release_selenium_slot(slot_token)
-                await log("🛑 Session ended")
+                await log("Selenium session ended")
+
+                if run_download_dir and os.path.isdir(run_download_dir):
+                    try:
+                        shutil.rmtree(run_download_dir, ignore_errors=True)
+                        logger.info("Removed run download dir: %s", run_download_dir)
+                    except Exception as cleanup_error:
+                        logger.warning("Could not remove run download dir %s: %s", run_download_dir, cleanup_error)
+
+            # -------------------------------------------------------------------------
+            # Post-Processing (Selenium Released)
+            # -------------------------------------------------------------------------
+            if result_payload is not None and job and job.credential_id:
+                credential = await Credential.get(job.credential_id)
+
+                if credential and credential.enable_processing:
+                    from core.services.file_manager import FileManager
+                    from core.services.file_processor import FileProcessorService
+
+                    await log("🔄 Processing files (Selenium released)...")
+                    try:
+                        processed_paths = await FileProcessorService.process_files(
+                            run_id,
+                            job.credential_id,
+                        )
+
+                        if processed_paths:
+                            # Re-fetch run to ensure we have latest state
+                            current_run = await Run.get(run_id)
+                            if not current_run:
+                                await log("⚠️ Run not found while appending processed files")
+                                return result_payload
+                            
+                            current_files = current_run.files or []
+
+                            for processed_path in processed_paths:
+                                current_files.append(
+                                    {
+                                        "file_type": "processed",
+                                        "filename": os.path.basename(processed_path),
+                                        "path": FileManager.to_artifact_relative(processed_path),
+                                        "size_bytes": FileManager.get_file_size(processed_path),
+                                        "status": "ready",
+                                    }
+                                )
+
+                            await current_run.update({"$set": {"files": current_files}})
+                            await log(f"✅ Processed {len(processed_paths)} file(s)")
+                        else:
+                            await log("ℹ️ No processor configured or active for this credential")
+                    except Exception as proc_error:
+                        await log(f"⚠️ File processing error: {proc_error}")
+                        # Do not fail the run if processing fails, as scraping was successful
+                else:
+                    await log("ℹ️ File processing disabled for this credential")
+
+            return result_payload
                 
         except Exception as e:
             logger.exception(f"❌ Scrape task exception: {e}")
             await repo.save_run_status(run_id, "failed", str(e))
             raise
-        finally:
-            if run_download_dir and os.path.isdir(run_download_dir):
-                try:
-                    shutil.rmtree(run_download_dir, ignore_errors=True)
-                    logger.info(f"🧹 Removed run download dir: {run_download_dir}")
-                except Exception as cleanup_error:
-                    logger.warning(f"Could not remove run download dir {run_download_dir}: {cleanup_error}")
     
     # Use existing event loop or create new one if needed
     try:

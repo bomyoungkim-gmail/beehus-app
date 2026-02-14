@@ -28,7 +28,7 @@ class InviteResponse(BaseModel):
 
 class UserOut(BaseModel):
     id: str
-    email: EmailStr
+    email: str
     full_name: Optional[str] = None
     role: str
     is_active: bool

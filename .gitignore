@@ -27,5 +27,6 @@ ai/
 .claude.md
 .codex.md
 .llm.md
+
 # Artifacts
 artifacts/

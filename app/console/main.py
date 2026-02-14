@@ -15,7 +15,7 @@ from core.utils.date_utils import get_now
 
 from core.db import init_db, close_db
 from core.config import settings
-from core.models.mongo_models import Workspace, InboxIntegration, OtpRule, Job, Run, OtpAudit
+from core.models.mongo_models import Workspace, InboxIntegration, OtpRule, Job, Run, OtpAudit, Credential
 from core.tasks import scrape_task
 from core.services.user_service import ensure_admin_exists
 from django_config import celery_app
@@ -113,11 +113,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.console.routers import auth, credentials, users, downloads
+from app.console.routers import auth, credentials, users, downloads, processors
 app.include_router(auth.router)
 app.include_router(credentials.router)
 app.include_router(users.router)
 app.include_router(downloads.router)
+app.include_router(processors.router)
 
 
 # ============================================================================
@@ -226,6 +227,28 @@ async def list_otp_rules(workspace_id: str = None):
 @app.post("/jobs", response_model=JobResponse)
 async def create_job(job_in: JobCreate):
     """Create a new scraping job."""
+    if job_in.credential_id:
+        credential = await Credential.get(job_in.credential_id)
+        if not credential:
+            raise HTTPException(status_code=400, detail="Credential not found")
+        if credential.workspace_id != job_in.workspace_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Credential must belong to the same workspace as the job",
+            )
+    elif job_in.connector == "itau_onshore_login":
+        manual_agency = job_in.params.get("agencia")
+        manual_account = job_in.params.get("conta_corrente") or job_in.params.get("conta")
+        manual_username = job_in.params.get("username") or job_in.params.get("user")
+        manual_password = job_in.params.get("password") or job_in.params.get("pass")
+        if not all([manual_agency, manual_account, manual_username, manual_password]):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Itaú onshore manual jobs require username, password, agencia and conta"
+                ),
+            )
+
     job = Job(**job_in.dict())
     await job.save()
     return job
@@ -291,7 +314,7 @@ async def trigger_run(job_id: str):
         raise HTTPException(status_code=400, detail="Job is not active")
     
     # 2. Create run document
-    run = Run(job_id=job.id, connector=job.connector, status="queued")
+    run = Run(job_id=job.id, job_name=job.name, connector=job.connector, status="queued")
     await run.save()
     
     # Merge job configuration into params
@@ -346,6 +369,8 @@ async def retry_run(job_id: str, run_id: str):
     # Ensure connector is set (for old runs that didn't have it)
     if not run.connector and job:
         run.connector = job.connector
+    if not run.job_name and job:
+        run.job_name = job.name
     await run.save()
     
     # Merge job configuration into params
@@ -496,15 +521,19 @@ async def get_recent_runs(limit: int = 10):
     
     result = []
     for run in runs:
-        # Use connector from run if available, otherwise try to fetch from job
+        # Use connector and job name from run if available, otherwise fetch from job
         connector_name = run.connector if run.connector else "Unknown"
+        job_name = run.job_name if run.job_name else None
         
         # If connector not in run, try to fetch from job (for backwards compatibility)
-        if not run.connector and run.job_id and run.job_id != "test-job":
+        if (not run.connector or not job_name) and run.job_id and run.job_id != "test-job":
             try:
                 job = await Job.get(run.job_id)
                 if job:
-                    connector_name = job.connector
+                    if not run.connector:
+                        connector_name = job.connector
+                    if not job_name:
+                        job_name = job.name
             except Exception as e:
                 logger.warning(f"Failed to fetch job {run.job_id}: {e}")
         
@@ -528,6 +557,7 @@ async def get_recent_runs(limit: int = 10):
         result.append({
             "run_id": str(run.id),
             "job_id": run.job_id or "N/A",
+            "job_name": job_name or connector_name,
             "connector": connector_name,
             "status": run.status,
             "report_date": run.report_date,

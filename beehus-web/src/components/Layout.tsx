@@ -1,11 +1,35 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const { logout, isAdmin } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const timezone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+    [],
+  );
+
+  const formatDateTime = (date: Date) => {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const seconds = String(date.getSeconds()).padStart(2, '0');
+    return `${day}/${month}/${year} - ${hours}:${minutes}:${seconds}`;
+  };
 
   const isActive = (path: string) => 
     pathname === path 
@@ -71,6 +95,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                     <div className="transition-opacity duration-300">
                         <p className="text-sm font-semibold text-white">User</p>
                         <p className="text-xs text-brand-500">Online</p>
+                        <p className="text-[11px] text-slate-400">{formatDateTime(now)} ({timezone})</p>
                     </div>
                 )}
             </div>

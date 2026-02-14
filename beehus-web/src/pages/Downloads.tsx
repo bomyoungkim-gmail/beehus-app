@@ -28,6 +28,8 @@ export default function Downloads() {
 
     useEffect(() => {
         fetchDownloads();
+        const interval = window.setInterval(fetchDownloads, 10000);
+        return () => window.clearInterval(interval);
     }, []);
 
     const fetchDownloads = async () => {

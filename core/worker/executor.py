@@ -53,6 +53,9 @@ class SeleniumExecutor:
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "safebrowsing.enabled": True,
+            "profile.default_content_settings.popups": 0,
+            "profile.default_content_setting_values.automatic_downloads": 1,
+            "download.open_pdf_in_system_reader": False,
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False
         }
@@ -88,6 +91,7 @@ class SeleniumExecutor:
                     headless=False,
                     use_subprocess=True,
                 )
+                self._enable_auto_download()
                 logger.info(f"✅ Created Local UC driver session: {self.driver.session_id}")
                 self.node_id = "LOCAL_WORKER_CONTAINER"
                 self.vnc_url = f"{settings.VNC_URL_BASE}:7901"
@@ -102,6 +106,7 @@ class SeleniumExecutor:
                     command_executor=settings.SELENIUM_REMOTE_URL,
                     options=chrome_options
                 )
+                self._enable_auto_download()
                 logger.info(f"✅ Created remote driver session: {self.driver.session_id}")
                 
                 # Try to get node info
@@ -113,6 +118,66 @@ class SeleniumExecutor:
             except Exception as e:
                 logger.error(f"❌ Failed to connect to Selenium Grid: {e}")
                 raise
+
+    def _enable_auto_download(self) -> None:
+        """
+        Force Chrome to allow downloads in the configured directory without Save dialog.
+        """
+        if not self.driver:
+            return
+        page_ok = self._execute_cdp_command(
+            "Page.setDownloadBehavior",
+            {"behavior": "allow", "downloadPath": self.download_dir},
+        )
+        browser_ok = self._execute_cdp_command(
+            "Browser.setDownloadBehavior",
+            {
+                "behavior": "allow",
+                "downloadPath": self.download_dir,
+                "eventsEnabled": False,
+            },
+        )
+
+        if page_ok or browser_ok:
+            logger.info(
+                "⬇️ Auto-download behavior enabled via CDP (page=%s, browser=%s)",
+                page_ok,
+                browser_ok,
+            )
+        else:
+            logger.warning("Could not set CDP download behavior with available driver APIs")
+
+    def _execute_cdp_command(self, cmd: str, params: dict) -> bool:
+        """Execute CDP command across local and remote driver implementations."""
+        if not self.driver:
+            return False
+
+        # Local Chrome and some Selenium bindings expose execute_cdp_cmd directly.
+        try:
+            execute_cdp = getattr(self.driver, "execute_cdp_cmd", None)
+            if callable(execute_cdp):
+                execute_cdp(cmd, params)
+                return True
+        except Exception as e:
+            logger.debug("CDP via execute_cdp_cmd failed for %s: %s", cmd, e)
+
+        # RemoteWebDriver may only support the generic command executor API.
+        try:
+            execute = getattr(self.driver, "execute", None)
+            command_executor = getattr(self.driver, "command_executor", None)
+            if callable(execute) and command_executor is not None:
+                commands = getattr(command_executor, "_commands", None)
+                if isinstance(commands, dict):
+                    commands.setdefault(
+                        "executeCdpCommand",
+                        ("POST", "/session/$sessionId/goog/cdp/execute"),
+                    )
+                execute("executeCdpCommand", {"cmd": cmd, "params": params})
+                return True
+        except Exception as e:
+            logger.debug("CDP via execute() failed for %s: %s", cmd, e)
+
+        return False
 
     def _resolve_vnc_url(self, retries: int = 5, delay_seconds: float = 1.0) -> None:
         """Resolve and set the VNC URL for the current session."""

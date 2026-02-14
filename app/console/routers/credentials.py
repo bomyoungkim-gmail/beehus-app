@@ -19,6 +19,8 @@ class CredentialCreate(BaseModel):
     username: str
     password: str
     metadata: dict = {}
+    carteira: Optional[str] = None
+    enable_processing: bool = False
 
 
 class CredentialUpdate(BaseModel):
@@ -26,6 +28,8 @@ class CredentialUpdate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     metadata: Optional[dict] = None
+    carteira: Optional[str] = None
+    enable_processing: Optional[bool] = None
 
 
 class CredentialResponse(BaseModel):
@@ -34,6 +38,8 @@ class CredentialResponse(BaseModel):
     label: str
     username: str
     metadata: dict
+    carteira: Optional[str] = None
+    enable_processing: bool = False
     created_at: str
     updated_at: str
 
@@ -52,7 +58,9 @@ async def create_credential(cred_in: CredentialCreate):
         label=cred_in.label,
         username=cred_in.username,
         encrypted_password=encrypted_password,
-        metadata=cred_in.metadata
+        metadata=cred_in.metadata,
+        carteira=cred_in.carteira,
+        enable_processing=cred_in.enable_processing,
     )
     await credential.save()
     
@@ -62,6 +70,8 @@ async def create_credential(cred_in: CredentialCreate):
         label=credential.label,
         username=credential.username,
         metadata=credential.metadata,
+        carteira=credential.carteira,
+        enable_processing=credential.enable_processing,
         created_at=credential.created_at.isoformat(),
         updated_at=credential.updated_at.isoformat()
     )
@@ -84,6 +94,8 @@ async def list_credentials(workspace_id: Optional[str] = None):
             label=cred.label,
             username=cred.username,
             metadata=cred.metadata,
+            carteira=cred.carteira,
+            enable_processing=cred.enable_processing,
             created_at=cred.created_at.isoformat(),
             updated_at=cred.updated_at.isoformat()
         )
@@ -104,6 +116,8 @@ async def get_credential(credential_id: str):
         label=credential.label,
         username=credential.username,
         metadata=credential.metadata,
+        carteira=credential.carteira,
+        enable_processing=credential.enable_processing,
         created_at=credential.created_at.isoformat(),
         updated_at=credential.updated_at.isoformat()
     )
@@ -127,6 +141,10 @@ async def update_credential(credential_id: str, cred_update: CredentialUpdate):
         credential.encrypted_password = encrypt_value(cred_update.password)
     if cred_update.metadata is not None:
         credential.metadata = cred_update.metadata
+    if cred_update.carteira is not None:
+        credential.carteira = cred_update.carteira
+    if cred_update.enable_processing is not None:
+        credential.enable_processing = cred_update.enable_processing
     
     credential.updated_at = datetime.utcnow()
     await credential.save()
@@ -137,6 +155,8 @@ async def update_credential(credential_id: str, cred_update: CredentialUpdate):
         label=credential.label,
         username=credential.username,
         metadata=credential.metadata,
+        carteira=credential.carteira,
+        enable_processing=credential.enable_processing,
         created_at=credential.created_at.isoformat(),
         updated_at=credential.updated_at.isoformat()
     )

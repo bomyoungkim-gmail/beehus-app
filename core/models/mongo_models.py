@@ -85,11 +85,29 @@ class Credential(Document):
     username: str
     encrypted_password: str
     metadata: dict = {}
+    carteira: Optional[str] = None
+    enable_processing: bool = False
     created_at: datetime = Field(default_factory=get_now)
     updated_at: datetime = Field(default_factory=get_now)
 
     class Settings:
         name = "credentials"
+
+
+class FileProcessor(Document):
+    """File processor associated with a credential."""
+    id: str = Field(default_factory=generate_uuid)
+    credential_id: Indexed(str)
+    name: str
+    version: int = 1
+    processor_type: str = "python_script"
+    script_content: str
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=get_now)
+    updated_at: datetime = Field(default_factory=get_now)
+
+    class Settings:
+        name = "file_processors"
 
 
 class Job(Document):
@@ -173,5 +191,5 @@ class OtpAudit(Document):
         name = "otp_audit"
 
 MONGO_MODELS = [
-    User, Workspace, Job, Run, InboxIntegration, OtpRule, OtpAudit, Credential
+    User, Workspace, Job, Run, InboxIntegration, OtpRule, OtpAudit, Credential, FileProcessor
 ]

@@ -14,7 +14,7 @@ x-chrome-node-env: &chrome-node-env
   SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
 
 x-chrome-node: &chrome-node
-  image: selenium/node-chrome:latest
+  image: selenium/node-chrome:4.39.0
   shm_size: 2g
   mem_limit: 2g
   cpus: "1.0"
@@ -75,7 +75,7 @@ services:
 
   # Selenium Grid Hub
   selenium-hub:
-    image: selenium/hub:latest
+    image: selenium/hub:4.39.0
     container_name: beehus-app-selenium-hub
     ports:
       - "4444:4444"
@@ -183,7 +183,7 @@ services:
       context: ./beehus-web
       dockerfile: Dockerfile
     working_dir: /app
-    command: sh -c "rm -rf node_modules/.vite && npm rebuild esbuild && npm run dev -- --host"
+    command: sh -c "npm install && rm -rf node_modules/.vite && npm rebuild esbuild && npm run dev -- --host"
     volumes:
       - ./beehus-web:/app
       - /app/node_modules

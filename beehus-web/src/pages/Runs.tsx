@@ -7,6 +7,7 @@ import { useToast } from '../context/ToastContext';
 interface Run {
     run_id: string;
     job_id: string;
+    job_name?: string;
     connector: string;
     status: string;
     report_date?: string;
@@ -26,14 +27,23 @@ export default function Runs() {
     const wsRef = useRef<WebSocket | null>(null);
     const retryCountRef = useRef(0);
     const reconnectTimeoutRef = useRef<number | null>(null);
+    const initialConnectTimeoutRef = useRef<number | null>(null);
+    const shouldReconnectRef = useRef(true);
+    const intentionalCloseRef = useRef(false);
 
     const connectWebSocket = useCallback(() => {
         const maxRetries = 5;
-        const wsUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace('http', 'ws') + '/ws/runs';
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const wsUrl = `${apiUrl.replace(/^http/, 'ws')}/ws/runs`;
 
         if (wsRef.current) {
+            intentionalCloseRef.current = true;
+            wsRef.current.onopen = null;
+            wsRef.current.onmessage = null;
+            wsRef.current.onerror = null;
             wsRef.current.onclose = null;
             wsRef.current.close();
+            wsRef.current = null;
         }
 
         if (reconnectTimeoutRef.current) {
@@ -43,11 +53,13 @@ export default function Runs() {
 
         setWsConnecting(true);
         setWsError(null);
+        intentionalCloseRef.current = false;
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
+            if (ws !== wsRef.current) return;
             console.log('✅ Connected to Real-time Run Updates');
             retryCountRef.current = 0;
             setWsConnected(true);
@@ -56,6 +68,7 @@ export default function Runs() {
         };
 
         ws.onmessage = (event) => {
+            if (ws !== wsRef.current) return;
             try {
                 const data = JSON.parse(event.data);
                 setRuns(prevRuns => {
@@ -76,9 +89,14 @@ export default function Runs() {
         };
 
         ws.onclose = () => {
+            if (ws !== wsRef.current) return;
             console.log('🔴 WebSocket Disconnected');
             setWsConnected(false);
             setWsConnecting(false);
+
+            if (!shouldReconnectRef.current || intentionalCloseRef.current) {
+                return;
+            }
 
             if (retryCountRef.current < maxRetries) {
                 const timeout = Math.min(1000 * (2 ** retryCountRef.current), 10000);
@@ -91,6 +109,10 @@ export default function Runs() {
         };
 
         ws.onerror = (err) => {
+            if (ws !== wsRef.current) return;
+            if (!shouldReconnectRef.current || intentionalCloseRef.current) {
+                return;
+            }
             console.error('WebSocket Error:', err);
             setWsError('WebSocket error');
             ws.close();
@@ -99,6 +121,7 @@ export default function Runs() {
 
     useEffect(() => {
         let isMounted = true;
+        shouldReconnectRef.current = true;
 
         // Fetch initial state
         const fetchRuns = async () => {
@@ -117,14 +140,26 @@ export default function Runs() {
         };
 
         fetchRuns();
-        connectWebSocket();
+        initialConnectTimeoutRef.current = window.setTimeout(() => {
+            connectWebSocket();
+        }, 0);
 
         return () => {
             isMounted = false;
+            shouldReconnectRef.current = false;
+            intentionalCloseRef.current = true;
             // Clean close
             if (wsRef.current) {
+                wsRef.current.onopen = null;
+                wsRef.current.onmessage = null;
+                wsRef.current.onerror = null;
                 wsRef.current.onclose = null;
                 wsRef.current.close();
+                wsRef.current = null;
+            }
+            if (initialConnectTimeoutRef.current) {
+                window.clearTimeout(initialConnectTimeoutRef.current);
+                initialConnectTimeoutRef.current = null;
             }
             if (reconnectTimeoutRef.current) {
                 window.clearTimeout(reconnectTimeoutRef.current);
@@ -204,7 +239,7 @@ export default function Runs() {
                                 <th className="px-6 py-4">Position Date</th>
                                 <th className="px-6 py-4">History Date</th>
                                 <th className="px-6 py-4">Run ID</th>
-                                <th className="px-6 py-4">Connector</th>
+                                <th className="px-6 py-4">Job Name</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Node</th>
                                 <th className="px-6 py-4">Actions</th>
@@ -235,7 +270,7 @@ export default function Runs() {
                                         <td className="px-6 py-4 text-slate-300">{run.report_date || '-'}</td>
                                         <td className="px-6 py-4 text-slate-300">{run.history_date || '-'}</td>
                                         <td className="px-6 py-4 font-mono text-slate-300">#{run.run_id.slice(0, 8)}</td>
-                                        <td className="px-6 py-4 text-white">{run.connector}</td>
+                                        <td className="px-6 py-4 text-white">{run.job_name || run.connector}</td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusBadge(run.status)}`}>
                                                 {run.status === 'running' && <span className="w-1.5 h-1.5 bg-brand-400 rounded-full mr-1.5 animate-pulse"></span>}

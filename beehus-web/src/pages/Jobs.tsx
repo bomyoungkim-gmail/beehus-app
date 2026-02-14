@@ -10,6 +10,7 @@ interface Job {
     workspace_id: string;
     name: string;
     connector: string;
+    credential_id?: string;
     params: Record<string, any>;
     schedule?: string;
     status: string;
@@ -155,7 +156,14 @@ export default function Jobs() {
         } else if (formData.connector === 'itau_onshore_login') {
             setFormData(prev => ({
                 ...prev,
-                params: { username: '', password: '', use_business_day: false, business_day: '' }
+                params: {
+                    username: '',
+                    password: '',
+                    agencia: '',
+                    conta_corrente: '',
+                    use_business_day: false,
+                    business_day: ''
+                }
             }));
         } else if (formData.connector === 'generic_scraper') {
             setFormData(prev => ({ ...prev, params: { url: '', selector: '' } }));
@@ -178,6 +186,22 @@ export default function Jobs() {
                     return;
                 }
             }
+
+            if (formData.connector === 'itau_onshore_login' && !formData.credential_id) {
+                const manualAgency = finalParams.agencia;
+                const manualAccount = finalParams.conta_corrente || finalParams.conta;
+                const manualUsername = finalParams.username || finalParams.user;
+                const manualPassword = finalParams.password || finalParams.pass;
+
+                if (!manualAgency || !manualAccount || !manualUsername || !manualPassword) {
+                    showToast(
+                        'Para Itaú manual, preencha usuário, senha, agência e conta.',
+                        'error',
+                    );
+                    setCreating(false);
+                    return;
+                }
+            }
             
             // Determine final schedule value and normalize (remove extra spaces)
         let finalSchedule = scheduleType === 'custom' ? customCron : scheduleType;
@@ -188,6 +212,7 @@ export default function Jobs() {
             
             await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs`, {
                 ...formData,
+                credential_id: formData.credential_id || undefined,
                 params: finalParams,
                 schedule: finalSchedule || undefined
             });
@@ -603,6 +628,36 @@ export default function Jobs() {
                                                                     placeholder="••••••••"
                                                                 />
                                                             </div>
+                                                            {formData.connector === 'itau_onshore_login' && (
+                                                                <>
+                                                                    <div>
+                                                                        <label className="block text-sm text-slate-400 mb-2">Agência</label>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={(formData.params as any).agencia || ''}
+                                                                            onChange={(e) => setFormData({
+                                                                                ...formData,
+                                                                                params: { ...formData.params, agencia: e.target.value }
+                                                                            })}
+                                                                            className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
+                                                                            placeholder="0000"
+                                                                        />
+                                                                    </div>
+                                                                    <div>
+                                                                        <label className="block text-sm text-slate-400 mb-2">Conta</label>
+                                                                        <input
+                                                                            type="text"
+                                                                            value={(formData.params as any).conta_corrente || ''}
+                                                                            onChange={(e) => setFormData({
+                                                                                ...formData,
+                                                                                params: { ...formData.params, conta_corrente: e.target.value }
+                                                                            })}
+                                                                            className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
+                                                                            placeholder="12345-6"
+                                                                        />
+                                                                    </div>
+                                                                </>
+                                                            )}
                                                         </div>
                                                     )}
 

@@ -56,6 +56,7 @@ class FileManager:
         pattern: str = "*.xlsx",
         timeout_seconds: int = 30,
         source_dir: Optional[str] = None,
+        exclude_paths: Optional[set[str]] = None,
     ) -> Optional[str]:
         """
         Capture a downloaded file from the downloads directory.
@@ -73,10 +74,30 @@ class FileManager:
         start_time = time.time()
         found_file = None
         downloads_dir = Path(source_dir) if source_dir else FileManager._downloads_dir()
+        default_downloads_dir = FileManager._downloads_dir()
+
+        def _list_complete_files(base_dir: Path) -> List[str]:
+            files = glob.glob(str(base_dir / pattern))
+            excluded = exclude_paths or set()
+            return [
+                f for f in files
+                if (
+                    os.path.isfile(f)
+                    and not f.endswith((".crdownload", ".tmp", ".part"))
+                    and os.path.abspath(f) not in excluded
+                )
+            ]
 
         while time.time() - start_time < timeout_seconds:
-            files = glob.glob(str(downloads_dir / pattern))
-            complete_files = [f for f in files if not f.endswith((".crdownload", ".tmp", ".part"))]
+            complete_files = _list_complete_files(downloads_dir)
+
+            # Fallback for remote Selenium nodes that ignore run-specific folder.
+            if (
+                not complete_files
+                and source_dir
+                and downloads_dir.resolve() != default_downloads_dir.resolve()
+            ):
+                complete_files = _list_complete_files(default_downloads_dir)
 
             if complete_files:
                 found_file = max(complete_files, key=os.path.getmtime)
@@ -108,6 +129,7 @@ class FileManager:
         pattern: str = "*.xlsx",
         timeout_seconds: int = 30,
         source_dir: Optional[str] = None,
+        exclude_paths: Optional[set[str]] = None,
     ) -> List[str]:
         """
         Capture all downloaded files from the downloads directory.
@@ -120,10 +142,30 @@ class FileManager:
         start_time = time.time()
         captured: List[str] = []
         downloads_dir = Path(source_dir) if source_dir else FileManager._downloads_dir()
+        default_downloads_dir = FileManager._downloads_dir()
+
+        def _list_complete_files(base_dir: Path) -> List[str]:
+            files = glob.glob(str(base_dir / pattern))
+            excluded = exclude_paths or set()
+            return [
+                f for f in files
+                if (
+                    os.path.isfile(f)
+                    and not f.endswith((".crdownload", ".tmp", ".part"))
+                    and os.path.abspath(f) not in excluded
+                )
+            ]
 
         while time.time() - start_time < timeout_seconds:
-            files = glob.glob(str(downloads_dir / pattern))
-            complete_files = [f for f in files if not f.endswith((".crdownload", ".tmp", ".part"))]
+            complete_files = _list_complete_files(downloads_dir)
+
+            # Fallback for remote Selenium nodes that ignore run-specific folder.
+            if (
+                not complete_files
+                and source_dir
+                and downloads_dir.resolve() != default_downloads_dir.resolve()
+            ):
+                complete_files = _list_complete_files(default_downloads_dir)
 
             if complete_files:
                 run_dir = FileManager._artifacts_dir() / run_id / "original"

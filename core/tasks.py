@@ -103,7 +103,7 @@ class DatabaseTask(Task):
         return super().__call__(*args, **kwargs)
 
 
-@celery_app.task(bind=True, max_retries=3, time_limit=1800)
+@celery_app.task(base=DatabaseTask, bind=True, max_retries=3, time_limit=1800)
 def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_name: str, params: dict):
     """
     Main scraping task - executes a connector with Selenium.
@@ -332,6 +332,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 await log("Checking for downloaded files...")
                 try:
                     from core.services.file_manager import FileManager
+                    from core.services.excel_introspection import is_excel_filename, list_sheet_names
 
                     original_paths = FileManager.capture_downloads(
                         run_id,
@@ -371,6 +372,12 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                                     "path": FileManager.to_artifact_relative(renamed_original),
                                     "size_bytes": FileManager.get_file_size(renamed_original),
                                     "status": "ready",
+                                    "is_excel": is_excel_filename(os.path.basename(renamed_original)),
+                                    "sheet_options": (
+                                        list_sheet_names(renamed_original)
+                                        if is_excel_filename(os.path.basename(renamed_original))
+                                        else []
+                                    ),
                                     "is_latest": False,
                                 }
                             )
@@ -446,14 +453,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             await repo.save_run_status(run_id, "failed", str(e))
             raise
     
-    # Use existing event loop or create new one if needed
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(_async_scrape())
+    return asyncio.run(_async_scrape())
 
 
 @celery_app.task(base=DatabaseTask, bind=True)
@@ -580,6 +580,19 @@ def scheduled_job_runner(self, job_id: str):
         await run.save()
         
         logger.info(f"📅 Scheduled job triggered: {job_id}, run: {run.id}")
+
+        execution_params = (job.params or {}).copy()
+        execution_params.update(
+            {
+                "export_holdings": job.export_holdings,
+                "export_history": job.export_history,
+                "date_mode": job.date_mode,
+                "holdings_lag_days": job.holdings_lag_days,
+                "history_lag_days": job.history_lag_days,
+                "holdings_date": job.holdings_date,
+                "history_date": job.history_date,
+            }
+        )
         
         # Dispatch to regular scrape task
         scrape_task.delay(
@@ -587,7 +600,7 @@ def scheduled_job_runner(self, job_id: str):
             run_id=str(run.id),
             workspace_id=job.workspace_id,
             connector_name=job.connector,
-            params=job.params
+            params=execution_params
         )
         
         return {"job_id": job_id, "run_id": str(run.id)}

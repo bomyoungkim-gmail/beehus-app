@@ -4,10 +4,11 @@ Credentials Router - API endpoints for managing secure credentials.
 
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.models.mongo_models import Credential
-from core.security import encrypt_value, decrypt_value
+from core.security import encrypt_value
+from core.utils.date_utils import get_now
 
 router = APIRouter(prefix="/credentials", tags=["credentials"])
 
@@ -18,7 +19,7 @@ class CredentialCreate(BaseModel):
     label: str
     username: str
     password: str
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
     carteira: Optional[str] = None
     enable_processing: bool = False
 
@@ -126,8 +127,6 @@ async def get_credential(credential_id: str):
 @router.put("/{credential_id}", response_model=CredentialResponse)
 async def update_credential(credential_id: str, cred_update: CredentialUpdate):
     """Update an existing credential."""
-    from datetime import datetime
-    
     credential = await Credential.get(credential_id)
     if not credential:
         raise HTTPException(status_code=404, detail="Credential not found")
@@ -146,7 +145,7 @@ async def update_credential(credential_id: str, cred_update: CredentialUpdate):
     if cred_update.enable_processing is not None:
         credential.enable_processing = cred_update.enable_processing
     
-    credential.updated_at = datetime.utcnow()
+    credential.updated_at = get_now()
     await credential.save()
     
     return CredentialResponse(

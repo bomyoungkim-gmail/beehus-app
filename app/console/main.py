@@ -8,6 +8,7 @@ from cryptography.fernet import Fernet
 import os
 import asyncio
 import json
+import logging
 import redis.asyncio as redis
 from typing import List
 from datetime import datetime
@@ -26,6 +27,8 @@ from core.schemas.otp import (
 )
 from app.console.schemas import JobCreate, JobResponse, RunResponse
 from app.console.websockets import ConnectionManager
+
+logger = logging.getLogger(__name__)
 
 # WebSocket Manager
 manager = ConnectionManager()
@@ -59,17 +62,30 @@ async def redis_listener():
         print(f"Redis listener error: {e}")
 
 # Crypto Helpers
+def _token_fernet() -> Fernet:
+    raw_key = os.getenv("TOKEN_ENC_KEY", "").strip()
+    if not raw_key:
+        raise RuntimeError(
+            "TOKEN_ENC_KEY is not configured. Set a valid Fernet key in environment."
+        )
+    try:
+        return Fernet(raw_key.encode())
+    except Exception as exc:
+        raise RuntimeError(
+            "Invalid TOKEN_ENC_KEY. Generate one with: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        ) from exc
+
+
 def encrypt_token(token: str) -> str:
     """Encrypts a token using Fernet symmetric encryption."""
-    key = os.getenv("TOKEN_ENC_KEY", "someloginsecretkeythatshouldbesecret==").encode()
-    f = Fernet(key)
+    f = _token_fernet()
     return f.encrypt(token.encode()).decode()
 
 
 def decrypt_token(token: str) -> str:
     """Decrypts a token using Fernet symmetric encryption."""
-    key = os.getenv("TOKEN_ENC_KEY", "someloginsecretkeythatshouldbesecret==").encode()
-    f = Fernet(key)
+    f = _token_fernet()
     return f.decrypt(token.encode()).decode()
 
 
@@ -160,6 +176,7 @@ async def delete_workspace(workspace_id: str):
     # Also delete all jobs in this workspace
     jobs = await Job.find(Job.workspace_id == workspace_id).to_list()
     for job in jobs:
+        await Run.find(Run.job_id == str(job.id)).delete()
         await job.delete()
     
     await workspace.delete()
@@ -392,7 +409,7 @@ async def retry_run(job_id: str, run_id: str):
     # Re-dispatch to Celery
     task = scrape_task.delay(
         job_id=job.id,
-        run_id=run.id,
+        run_id=str(run.id),
         workspace_id=job.workspace_id,
         connector_name=job.connector,
         params=execution_params

@@ -171,7 +171,10 @@ docker compose restart app-console
 1. Abrir `https://app.seudominio.com/`
 2. Abrir docs da API: `https://app.seudominio.com/api/docs`
 3. Convidar usuario na tela de Users
-4. Validar:
+4. Validar fluxo de processamento em `Runs`:
+   - quando run estiver em `pending_file_selection`/`pending_sheet_selection`, selecionar arquivo/aba
+   - confirmar que arquivo processado aparece em `Downloads` com marcador `Latest`
+5. Validar:
    - link gerado com `https://app.seudominio.com/accept-invitation?...`
    - email enviado (`email_sent = true`)
    - aceite do convite conclui login

@@ -52,6 +52,10 @@ class RunResponse(BaseModel):
     error_summary: Optional[str]
     vnc_url: Optional[str] = None
     logs: List[str] = []
+    processing_status: str = "not_required"
+    selected_filename: Optional[str] = None
+    selected_sheet: Optional[str] = None
+    processing_error: Optional[str] = None
     
     class Config:
         from_attributes = True

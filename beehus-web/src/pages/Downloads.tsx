@@ -10,6 +10,7 @@ interface FileMetadata {
     path: string;
     size_bytes?: number;
     status: string;
+    is_latest?: boolean;
 }
 
 interface DownloadItem {
@@ -147,7 +148,14 @@ export default function Downloads() {
                                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                                                                 </svg>
                                                                 <div className="text-left">
-                                                                    <div>{file.filename}</div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span>{file.filename}</span>
+                                                                        {file.is_latest && (
+                                                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-500/20 text-green-300 border border-green-500/30">
+                                                                                Latest
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                     <div className="text-xs text-slate-500">{formatFileSize(file.size_bytes)}</div>
                                                                 </div>
                                                             </button>

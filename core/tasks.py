@@ -371,6 +371,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                                     "path": FileManager.to_artifact_relative(renamed_original),
                                     "size_bytes": FileManager.get_file_size(renamed_original),
                                     "status": "ready",
+                                    "is_latest": False,
                                 }
                             )
 
@@ -415,40 +416,23 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 credential = await Credential.get(job.credential_id)
 
                 if credential and credential.enable_processing:
-                    from core.services.file_manager import FileManager
                     from core.services.file_processor import FileProcessorService
 
                     await log("🔄 Processing files (Selenium released)...")
                     try:
-                        processed_paths = await FileProcessorService.process_files(
-                            run_id,
-                            job.credential_id,
+                        processing_state = await FileProcessorService.resolve_and_process_post_scrape(
+                            run_id=run_id,
+                            job_id=job.id,
+                            credential_id=job.credential_id,
                         )
-
-                        if processed_paths:
-                            # Re-fetch run to ensure we have latest state
-                            current_run = await Run.get(run_id)
-                            if not current_run:
-                                await log("⚠️ Run not found while appending processed files")
-                                return result_payload
-                            
-                            current_files = current_run.files or []
-
-                            for processed_path in processed_paths:
-                                current_files.append(
-                                    {
-                                        "file_type": "processed",
-                                        "filename": os.path.basename(processed_path),
-                                        "path": FileManager.to_artifact_relative(processed_path),
-                                        "size_bytes": FileManager.get_file_size(processed_path),
-                                        "status": "ready",
-                                    }
-                                )
-
-                            await current_run.update({"$set": {"files": current_files}})
-                            await log(f"✅ Processed {len(processed_paths)} file(s)")
+                        if processing_state == "processed":
+                            await log("✅ Processed files generated successfully")
+                        elif processing_state in {"pending_file_selection", "pending_sheet_selection"}:
+                            await log(f"⏸️ Waiting for user action: {processing_state}")
+                        elif processing_state == "not_required":
+                            await log("ℹ️ No original files available for processing")
                         else:
-                            await log("ℹ️ No processor configured or active for this credential")
+                            await log(f"⚠️ File processing ended with state: {processing_state}")
                     except Exception as proc_error:
                         await log(f"⚠️ File processing error: {proc_error}")
                         # Do not fail the run if processing fails, as scraping was successful

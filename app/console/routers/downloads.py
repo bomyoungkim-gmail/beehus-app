@@ -2,7 +2,7 @@
 Downloads API router - Provides endpoints for listing and downloading processed files.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from pathlib import Path
@@ -12,6 +12,8 @@ import logging
 import os
 
 from core.models.mongo_models import Job, Run
+from core.services.excel_introspection import is_excel_filename, list_sheet_names
+from core.services.file_processor import FileProcessorService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,7 @@ class FileMetadata(BaseModel):
     path: str
     size_bytes: Optional[int]
     status: str
+    is_latest: bool = False
 
 
 class DownloadItem(BaseModel):
@@ -38,6 +41,26 @@ class DownloadItem(BaseModel):
     status: str
     created_at: str
     files: List[FileMetadata]
+
+class ProcessingFileOption(BaseModel):
+    filename: str
+    size_bytes: Optional[int]
+    is_excel: bool
+    sheet_options: List[str] = []
+
+
+class SelectFileRequest(BaseModel):
+    filename: str
+
+
+class SelectSheetRequest(BaseModel):
+    filename: str
+    selected_sheet: str
+
+
+class ReprocessRequest(BaseModel):
+    filename: Optional[str] = None
+    selected_sheet: Optional[str] = None
 
 
 def _artifacts_dir() -> Path:
@@ -62,6 +85,15 @@ def _resolve_artifact_path(relative_path: str) -> Path:
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid artifact path")
     return candidate
+
+
+def _original_files(run: Run) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for file_meta in run.files or []:
+        candidate = _file_meta_to_dict(file_meta)
+        if candidate.get("file_type") == "original":
+            out.append(candidate)
+    return out
 
 
 def _to_iso8601_utc(value: datetime) -> str:
@@ -195,3 +227,173 @@ async def get_run_files(run_id: str):
     except Exception as e:
         logger.error(f"Error fetching run files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{run_id}/processing/options", response_model=List[ProcessingFileOption])
+async def get_processing_options(run_id: str):
+    """List original files that can be selected for processing."""
+    run = await Run.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    originals = _original_files(run)
+    options: List[ProcessingFileOption] = []
+    for file_meta in originals:
+        filename = file_meta.get("filename", "")
+        is_excel = is_excel_filename(filename)
+        sheet_options: List[str] = []
+        if is_excel:
+            try:
+                file_path = _resolve_artifact_path(file_meta["path"])
+                if file_path.exists():
+                    sheet_options = list_sheet_names(str(file_path))
+            except Exception as exc:
+                logger.warning("Failed to list sheet options for %s: %s", filename, exc)
+        options.append(
+            ProcessingFileOption(
+                filename=filename,
+                size_bytes=file_meta.get("size_bytes"),
+                is_excel=is_excel,
+                sheet_options=sheet_options,
+            )
+        )
+    return options
+
+
+@router.get("/{run_id}/processing/excel-options", response_model=List[str])
+async def get_excel_options(run_id: str, filename: Optional[str] = Query(default=None)):
+    """Return sheet names for selected excel file."""
+    run = await Run.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    target_name = filename or run.selected_filename
+    if not target_name:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    if not is_excel_filename(target_name):
+        raise HTTPException(status_code=400, detail="Selected file is not an Excel file")
+
+    file_meta = next((f for f in _original_files(run) if f.get("filename") == target_name), None)
+    if not file_meta:
+        raise HTTPException(status_code=404, detail="Original file not found")
+
+    file_path = _resolve_artifact_path(file_meta["path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    try:
+        return list_sheet_names(str(file_path))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read sheets: {exc}") from exc
+
+
+@router.post("/{run_id}/processing/select-file")
+async def select_file_for_processing(run_id: str, payload: SelectFileRequest):
+    run = await Run.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    job = await Job.get(run.job_id) if run.job_id else None
+    if not job or not job.credential_id:
+        raise HTTPException(status_code=400, detail="Run has no linked job credential")
+
+    originals = _original_files(run)
+    selected = next((f for f in originals if f.get("filename") == payload.filename), None)
+    if not selected:
+        raise HTTPException(status_code=404, detail="Selected file not found in run originals")
+
+    if is_excel_filename(payload.filename):
+        sheet_options = await get_excel_options(run_id, payload.filename)
+        if job.last_selected_sheet and job.last_selected_sheet in sheet_options:
+            state = await FileProcessorService.process_with_user_selection(
+                run_id=run_id,
+                filename=payload.filename,
+                selected_sheet=job.last_selected_sheet,
+            )
+            return {"status": state, "selected_filename": payload.filename, "selected_sheet": job.last_selected_sheet}
+        if len(sheet_options) == 1:
+            state = await FileProcessorService.process_with_user_selection(
+                run_id=run_id,
+                filename=payload.filename,
+                selected_sheet=sheet_options[0],
+            )
+            return {"status": state, "selected_filename": payload.filename, "selected_sheet": sheet_options[0]}
+        await run.update(
+            {
+                "$set": {
+                    "processing_status": "pending_sheet_selection",
+                    "selected_filename": payload.filename,
+                    "selected_sheet": None,
+                    "processing_error": None,
+                }
+            }
+        )
+        return {"status": "pending_sheet_selection", "selected_filename": payload.filename, "sheet_options": sheet_options}
+
+    state = await FileProcessorService.process_with_user_selection(
+        run_id=run_id,
+        filename=payload.filename,
+        selected_sheet=None,
+    )
+    return {"status": state, "selected_filename": payload.filename}
+
+
+@router.post("/{run_id}/processing/select-sheet")
+async def select_sheet_for_processing(run_id: str, payload: SelectSheetRequest):
+    state = await FileProcessorService.process_with_user_selection(
+        run_id=run_id,
+        filename=payload.filename,
+        selected_sheet=payload.selected_sheet,
+    )
+    if state == "failed":
+        run = await Run.get(run_id)
+        detail = run.processing_error if run else "Processing failed"
+        raise HTTPException(status_code=400, detail=detail)
+    return {"status": state, "selected_filename": payload.filename, "selected_sheet": payload.selected_sheet}
+
+
+@router.post("/{run_id}/processing/process")
+async def reprocess_run(run_id: str, payload: ReprocessRequest):
+    """
+    Reprocess a run using explicit selection or persisted latest selection.
+    Creates a new processed version and marks it as latest.
+    """
+    run = await Run.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    job = await Job.get(run.job_id) if run.job_id else None
+    if not job or not job.credential_id:
+        raise HTTPException(status_code=400, detail="Run has no linked job credential")
+
+    originals = _original_files(run)
+    names = [f.get("filename") for f in originals if f.get("filename")]
+    if not names:
+        raise HTTPException(status_code=400, detail="Run has no original files to process")
+
+    filename = payload.filename or run.selected_filename or job.last_selected_filename
+    if not filename:
+        if len(names) == 1:
+            filename = names[0]
+        else:
+            await run.update({"$set": {"processing_status": "pending_file_selection", "processing_error": None}})
+            return {"status": "pending_file_selection"}
+
+    if filename not in names:
+        raise HTTPException(status_code=400, detail=f"File '{filename}' not found among run originals")
+
+    selected_sheet = payload.selected_sheet or run.selected_sheet or job.last_selected_sheet
+    state = await FileProcessorService.process_with_user_selection(
+        run_id=run_id,
+        filename=filename,
+        selected_sheet=selected_sheet,
+    )
+    if state == "failed":
+        run = await Run.get(run_id)
+        detail = run.processing_error if run else "Processing failed"
+        raise HTTPException(status_code=400, detail=detail)
+
+    return {
+        "status": state,
+        "selected_filename": filename,
+        "selected_sheet": selected_sheet,
+    }

@@ -366,6 +366,10 @@ async def retry_run(job_id: str, run_id: str):
     run.error_summary = None
     run.started_at = None
     run.finished_at = None
+    run.processing_status = "not_required"
+    run.selected_filename = None
+    run.selected_sheet = None
+    run.processing_error = None
     # Ensure connector is set (for old runs that didn't have it)
     if not run.connector and job:
         run.connector = job.connector
@@ -560,6 +564,10 @@ async def get_recent_runs(limit: int = 10):
             "job_name": job_name or connector_name,
             "connector": connector_name,
             "status": run.status,
+            "processing_status": run.processing_status or "not_required",
+            "selected_filename": run.selected_filename,
+            "selected_sheet": run.selected_sheet,
+            "processing_error": run.processing_error,
             "report_date": run.report_date,
             "history_date": run.history_date,
             "node": "selenium-node-1",  # TODO: Add node tracking

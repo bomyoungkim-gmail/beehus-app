@@ -128,7 +128,9 @@ Access [http://localhost:5173](http://localhost:5173) to:
 - **Monitor Live Executions:** View active and queued runs with real-time status updates.
 - **Manage Jobs/Workspaces:** Create and configure scraping jobs.
 - **Execution History:** View detailed logs of past runs via the "Runs" page.
+- **Processing Selection in Runs:** For ambiguous downloads, choose file and Excel sheet directly in "Runs"; recurring jobs reuse the last selection automatically.
 - **Downloads & Reports:** Access downloaded and processed files via the "Downloads" page.
+  - Reprocessed outputs keep version history and the newest processed file is marked as `Latest`.
 - **Credential Processors:** Configure per-credential file processing scripts with version history.
 - **Collapsible Sidebar:** Toggle the sidebar to maximize screen real estate.
 
@@ -192,6 +194,16 @@ Trigger a scrape via **App Console** Swagger UI ([http://localhost:8000/docs](ht
 
 The run will be queued in RabbitMQ, picked up by `celery-worker`, and executed on `selenium`.
 id **Gmail Refresh Token** and Client credentials.
+
+### Processing Selection Endpoints
+
+Use these endpoints when a run requires manual processing selection:
+
+- `GET /downloads/{run_id}/processing/options`
+- `POST /downloads/{run_id}/processing/select-file`
+- `GET /downloads/{run_id}/processing/excel-options?filename=...`
+- `POST /downloads/{run_id}/processing/select-sheet`
+- `POST /downloads/{run_id}/processing/process` (manual reprocess with versioned output)
 
 ### 4. Configure OTP
 

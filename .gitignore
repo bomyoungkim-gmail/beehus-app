@@ -36,3 +36,6 @@ artifacts/
 .env.clean
 docker-compose.yml.backup
 docker-compose.yml.dev
+
+# Reservado
+plano/

@@ -135,6 +135,9 @@ class Job(Document):
     # Specific date configuration (when date_mode = "specific")
     holdings_date: Optional[str] = None  # Format: YYYY-MM-DD
     history_date: Optional[str] = None    # Format: YYYY-MM-DD
+    last_selected_filename: Optional[str] = None
+    last_selected_sheet: Optional[str] = None
+    selection_updated_at: Optional[datetime] = None
     
     created_at: datetime = Field(default_factory=get_now)
     
@@ -149,6 +152,9 @@ class RunFile(BaseModel):
     path: str
     size_bytes: Optional[int] = None
     status: str = "ready"
+    is_excel: Optional[bool] = None
+    sheet_options: List[str] = Field(default_factory=list)
+    is_latest: bool = False
 
 
 class Run(Document):
@@ -170,6 +176,10 @@ class Run(Document):
     created_at: datetime = Field(default_factory=get_now)
     updated_at: Optional[datetime] = Field(default_factory=get_now)
     files: List[RunFile] = Field(default_factory=list)
+    processing_status: str = "not_required"
+    selected_filename: Optional[str] = None
+    selected_sheet: Optional[str] = None
+    processing_error: Optional[str] = None
     
     class Settings:
         name = "runs"

@@ -763,6 +763,9 @@ export default function Credentials() {
 # - metadata: credential metadata dict
 # - run_id: current run ID
 # - credential_label: credential label
+# - selected_filename: chosen file for this run (if applicable)
+# - selected_sheet: chosen Excel sheet (if applicable)
+# - source_excel_path: full path to selected Excel file (if applicable)
 
 from pathlib import Path
 

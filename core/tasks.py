@@ -465,7 +465,11 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             # Post-Processing (Selenium Released)
             # -------------------------------------------------------------------------
             if result_payload is not None and job:
-                should_process = bool(job.enable_processing and (job.processing_script or "").strip())
+                resolved_script = None
+                if job.enable_processing:
+                    from core.services.file_processor import FileProcessorService
+                    resolved_script, _ = FileProcessorService.resolve_job_processing_script(job)
+                should_process = bool(job.enable_processing and (resolved_script or "").strip())
                 if job.enable_processing and not should_process:
                     await log("ℹ️ Processing enabled on job, but no script configured yet")
 

@@ -26,7 +26,14 @@ interface Job {
     holdings_date?: string;
     history_date?: string;
     enable_processing?: boolean;
+    processing_config_json?: JobProcessingConfig;
     processing_script?: string;
+}
+
+interface JobProcessingConfig {
+    mode: 'visual' | 'advanced';
+    visual_config?: Partial<VisualProcessorConfig>;
+    advanced_script?: string;
 }
 
 interface Workspace {
@@ -154,7 +161,11 @@ def txt(candidates, default=""):
 def num(candidates, default=0.0):
     col = pick_col(candidates)
     if col:
-        return pd.to_numeric(df[col], errors="coerce").fillna(default)
+        raw = df[col]
+        parsed = pd.to_numeric(raw, errors="coerce")
+        if parsed.notna().any():
+            return parsed.fillna(default)
+        return raw.apply(ptbr_to_float).fillna(default)
     return pd.Series([default] * len(df), index=df.index)
 
 ativo_direct = txt(${q(aliases(cfg.ativo_direct_cols))})
@@ -168,6 +179,8 @@ pu = num(${q(aliases(cfg.pu_cols))}, 0.0)
 sb = num(${q(aliases(cfg.saldo_bruto_cols))}, 0.0)
 caixa_raw = txt(${q(aliases(cfg.caixa_cols))}).str.lower()
 caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])
+caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)
+data_ref = report_date or data_do_arquivo(arquivo)
 
 def _clean_text(v):
     s = str(v).strip()
@@ -192,7 +205,8 @@ else:
     ativo = ativo_direct
 
 out = pd.DataFrame({
-    "Data": data_do_arquivo(arquivo),
+    "Data": data_ref,
+    "Carteira": carteira,
     "Ativo": ativo,
     "Quant": qtd.where(~caixa, sb),
     "PU": pu.where(~caixa, 1.0),
@@ -209,6 +223,44 @@ out = out.loc[mask].reset_index(drop=True)
 
 return out
 `;
+}
+
+function normalizeVisualConfig(raw?: Partial<VisualProcessorConfig>): VisualProcessorConfig {
+    return {
+        ...DEFAULT_VISUAL_CONFIG,
+        ...(raw || {}),
+    };
+}
+
+function extractVisualConfigFromScript(script?: string): VisualProcessorConfig | null {
+    if (!script) return null;
+    const marker = '# VISUAL_CONFIG_JSON:';
+    const line = script
+        .split('\n')
+        .map((x) => x.trim())
+        .find((x) => x.startsWith(marker));
+    if (!line) return null;
+    const payload = line.slice(marker.length).trim();
+    try {
+        const parsed = JSON.parse(payload);
+        if (parsed && typeof parsed === 'object') {
+            return normalizeVisualConfig(parsed as Partial<VisualProcessorConfig>);
+        }
+    } catch (e) {
+        console.warn('Failed to parse visual config marker', e);
+    }
+    return null;
+}
+
+function scriptFromJobConfig(job: Job): string {
+    const cfg = job.processing_config_json;
+    if (cfg?.mode === 'visual') {
+        return buildVisualProcessorScript(normalizeVisualConfig(cfg.visual_config));
+    }
+    if (cfg?.mode === 'advanced' && cfg.advanced_script) {
+        return cfg.advanced_script;
+    }
+    return job.processing_script || DEFAULT_PROCESSING_SCRIPT;
 }
 
 export default function Jobs() {
@@ -448,6 +500,7 @@ export default function Jobs() {
                             ...j,
                             enable_processing: checked,
                             processing_script: checked ? j.processing_script : undefined,
+                            processing_config_json: checked ? j.processing_config_json : undefined,
                         }
                         : j
                 )
@@ -460,32 +513,55 @@ export default function Jobs() {
     };
 
     const openScriptEditor = (job: Job) => {
-        setVisualConfig(DEFAULT_VISUAL_CONFIG);
+        const extractedFromScript = extractVisualConfigFromScript(job.processing_script || '');
+        const visualFromConfig =
+            job.processing_config_json?.mode === 'visual'
+                ? normalizeVisualConfig(job.processing_config_json.visual_config)
+                : extractedFromScript;
+        setVisualConfig(visualFromConfig || DEFAULT_VISUAL_CONFIG);
         setMappingPreview({
             loading: false,
             columns: [],
             matches: [],
         });
+        const initialScript = scriptFromJobConfig(job);
+        const inferredMode = job.processing_config_json?.mode
+            || (extractedFromScript ? 'visual' : (job.processing_script ? 'advanced' : 'visual'));
+        const initialTab = inferredMode === 'advanced' ? 'advanced' : 'visual';
         setScriptModal({
             isOpen: true,
             job,
-            tab: 'visual',
-            script: job.processing_script || DEFAULT_PROCESSING_SCRIPT,
+            tab: initialTab,
+            script: initialScript,
         });
     };
 
     const saveJobScript = async () => {
         if (!scriptModal.job) return;
-        if (!scriptModal.script.trim()) {
+        const generatedScript = buildVisualProcessorScript(visualConfig);
+        const advancedScript = (scriptModal.script || '').trim();
+        const isAdvanced = scriptModal.tab === 'advanced';
+        const scriptToPersist = isAdvanced ? advancedScript : generatedScript;
+        if (!scriptToPersist.trim()) {
             showToast('Script vazio. Preencha antes de salvar.', 'error');
             return;
         }
 
         setSavingScript(true);
         try {
+            const payloadConfig: JobProcessingConfig = isAdvanced
+                ? {
+                    mode: 'advanced',
+                    advanced_script: scriptToPersist,
+                }
+                : {
+                    mode: 'visual',
+                    visual_config: visualConfig,
+                };
+            setScriptModal(prev => ({ ...prev, script: scriptToPersist }));
             const res = await axios.patch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs/${scriptModal.job.id}`, {
                 enable_processing: true,
-                processing_script: scriptModal.script,
+                processing_config_json: payloadConfig,
             });
             const updated = res.data as Job;
             setJobs(prev => prev.map(j => (j.id === updated.id ? updated : j)));
@@ -1318,7 +1394,8 @@ export default function Jobs() {
     export_holdings: viewParamsModal.job.export_holdings ?? true,
     export_history: viewParamsModal.job.export_history ?? false,
     enable_processing: viewParamsModal.job.enable_processing ?? false,
-    processing_script: (viewParamsModal.job.processing_script || '').slice(0, 200),
+    processing_config_json: viewParamsModal.job.processing_config_json || null,
+    processing_script_preview: (scriptFromJobConfig(viewParamsModal.job) || '').slice(0, 200),
     date_mode: viewParamsModal.job.date_mode ?? 'lag',
     ...((viewParamsModal.job.date_mode ?? 'lag') === 'lag' ? {
         holdings_lag_days: viewParamsModal.job.holdings_lag_days ?? 1,
@@ -1360,7 +1437,10 @@ export default function Jobs() {
                                 Visual
                             </button>
                             <button
-                                onClick={() => setScriptModal(prev => ({ ...prev, tab: 'advanced' }))}
+                                onClick={() => {
+                                    const generated = buildVisualProcessorScript(visualConfig);
+                                    setScriptModal(prev => ({ ...prev, tab: 'advanced', script: generated }));
+                                }}
                                 className={`px-3 py-1.5 rounded text-sm ${scriptModal.tab === 'advanced' ? 'bg-brand-600 text-white' : 'bg-white/5 text-slate-300'}`}
                             >
                                 Advanced
@@ -1499,12 +1579,14 @@ export default function Jobs() {
                                 </div>
                             )}
 
-                            <textarea
-                                value={scriptModal.script}
-                                onChange={(e) => setScriptModal(prev => ({ ...prev, script: e.target.value }))}
-                                className="w-full min-h-[360px] bg-dark-surface border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-500 font-mono text-sm"
-                                placeholder="Python processor script..."
-                            />
+                            {scriptModal.tab === 'advanced' && (
+                                <textarea
+                                    value={scriptModal.script}
+                                    onChange={(e) => setScriptModal(prev => ({ ...prev, script: e.target.value }))}
+                                    className="w-full min-h-[360px] bg-dark-surface border border-white/10 rounded-lg px-4 py-3 text-white font-mono text-sm"
+                                    placeholder="Cole ou edite o script advanced..."
+                                />
+                            )}
                         </div>
 
                         <div className="p-4 border-t border-white/10 flex items-center justify-end gap-3">

@@ -22,7 +22,9 @@ class JobCreate(BaseModel):
     holdings_date: Optional[str] = None
     history_date: Optional[str] = None
     enable_processing: bool = False
+    processing_config_json: Optional[Dict[str, Any]] = None
     processing_script: Optional[str] = None
+    sheet_aliases: List[str] = []
 
     @field_validator("credential_id", mode="before")
     @classmethod
@@ -45,7 +47,9 @@ class JobResponse(JobCreate):
 
 class JobUpdate(BaseModel):
     enable_processing: Optional[bool] = None
+    processing_config_json: Optional[Dict[str, Any]] = None
     processing_script: Optional[str] = None
+    sheet_aliases: Optional[List[str]] = None
 
 class RunResponse(BaseModel):
     id: str
@@ -59,6 +63,7 @@ class RunResponse(BaseModel):
     error_summary: Optional[str]
     vnc_url: Optional[str] = None
     logs: List[str] = []
+    processing_logs: List[str] = []
     processing_status: str = "not_required"
     selected_filename: Optional[str] = None
     selected_sheet: Optional[str] = None

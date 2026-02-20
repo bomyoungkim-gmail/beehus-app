@@ -37,6 +37,14 @@ def test_build_wrapped_script_advanced_mode_keeps_original_script():
     assert "def process_auto_generated(arquivo, aba, carteira, df_input):" not in wrapped
 
 
+def test_build_wrapped_script_with_df_input_forces_low_code_even_with_imports():
+    script = "import pandas as pd\ndf = df_input.copy()\nreturn df\n"
+    wrapped = FileProcessorService._build_wrapped_script(script, _context())
+
+    assert "# User script (low-code mode)" in wrapped
+    assert "def process_auto_generated(arquivo, aba, carteira, df_input):" in wrapped
+
+
 def test_normalize_processed_names_uses_positions_pattern(tmp_path):
     source = tmp_path / "processed_any.csv"
     source.write_text("a;b\n1;2\n", encoding="utf-8")

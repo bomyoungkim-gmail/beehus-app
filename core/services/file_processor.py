@@ -10,12 +10,15 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import traceback
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.models.mongo_models import Credential, Job, Run
 from core.services.excel_introspection import is_excel_filename, list_sheet_names
 from core.services.file_manager import FileManager
+from core.services.visual_processing import build_script_from_processing_config
 from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,197 @@ class FileProcessorService:
         return [f for f in FileProcessorService._run_files_to_dicts(run) if f.get("file_type") == "original"]
 
     @staticmethod
+    def _normalize_sheet_key(name: str) -> str:
+        text = (name or "").strip().lower()
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+        text = re.sub(r"[^a-z0-9]+", " ", text).strip()
+        return text
+
+    @staticmethod
+    def _patch_legacy_visual_script(script: str) -> str:
+        s = script or ""
+        if "VISUAL_BUILDER_" not in s:
+            return s
+        # Sanitiza bug legado onde "\\n" literal foi salvo dentro da linha de código.
+        s = s.replace(
+            ')\\ncaixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)',
+            ')\ncaixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)',
+        )
+        legacy_line_patterns = [
+            '        return pd.to_numeric(df[col], errors="coerce").fillna(default)',
+            "        return pd.to_numeric(df[col], errors='coerce').fillna(default)",
+        ]
+        improved_block = "\n".join(
+            [
+                "        raw = df[col]",
+                "        parsed = pd.to_numeric(raw, errors='coerce')",
+                "        if parsed.notna().any():",
+                "            return parsed.fillna(default)",
+                "        return raw.apply(ptbr_to_float).fillna(default)",
+            ]
+        )
+        for pattern in legacy_line_patterns:
+            if pattern in s:
+                s = s.replace(pattern, improved_block)
+        if 'caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])' in s and "conta corrente" not in s:
+            s = s.replace(
+                'caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])',
+                'caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])\n'
+                'caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)',
+            )
+        if '"Data": data_do_arquivo(arquivo),' in s:
+            s = s.replace(
+                '"Data": data_do_arquivo(arquivo),',
+                '"Data": (report_date or data_do_arquivo(arquivo)),\\n    "Carteira": carteira,',
+            )
+        if "return out" not in s and "out = out.loc[mask].reset_index(drop=True)" in s:
+            s = s.rstrip() + "\n\nreturn out\n"
+        return s
+
+    @staticmethod
+    def _pick_sheet_by_aliases(
+        sheet_options: List[str],
+        preferred: Optional[str],
+        aliases: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        if not sheet_options:
+            return None
+        normalized_options = {
+            FileProcessorService._normalize_sheet_key(opt): opt for opt in sheet_options
+        }
+
+        candidates: List[str] = []
+        if preferred:
+            candidates.append(preferred)
+        for alias in aliases or []:
+            if alias and alias not in candidates:
+                candidates.append(alias)
+
+        for candidate in candidates:
+            key = FileProcessorService._normalize_sheet_key(candidate)
+            if key in normalized_options:
+                return normalized_options[key]
+
+        # token-overlap fallback
+        for candidate in candidates:
+            c_key = FileProcessorService._normalize_sheet_key(candidate)
+            if not c_key:
+                continue
+            c_tokens = set(c_key.split())
+            if not c_tokens:
+                continue
+            best = None
+            best_score = 0
+            for opt in sheet_options:
+                o_key = FileProcessorService._normalize_sheet_key(opt)
+                o_tokens = set(o_key.split())
+                score = len(c_tokens & o_tokens)
+                if score > best_score:
+                    best_score = score
+                    best = opt
+            if best and best_score >= max(1, len(c_tokens) // 2):
+                return best
+        return None
+
+    @staticmethod
+    def _count_input_rows(
+        original_dir: str,
+        selected_filename: Optional[str],
+        selected_sheet: Optional[str],
+    ) -> Optional[int]:
+        if not selected_filename:
+            return None
+        try:
+            import pandas as pd
+            input_path = Path(original_dir) / selected_filename
+            if not input_path.exists():
+                return None
+            ext = input_path.suffix.lower()
+            if ext in {".xlsx", ".xls", ".xlsm", ".xlsb"}:
+                sheet_name = selected_sheet if selected_sheet not in (None, "") else 0
+                df = pd.read_excel(str(input_path), sheet_name=sheet_name)
+                return int(len(df.index))
+            if ext == ".csv":
+                try:
+                    df = pd.read_csv(str(input_path), sep=None, engine="python")
+                except Exception:
+                    df = pd.read_csv(str(input_path), sep=";", decimal=",")
+                return int(len(df.index))
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _validate_processed_outputs(
+        file_paths: List[str],
+        expected_input_rows: Optional[int] = None,
+    ) -> Optional[str]:
+        if not file_paths:
+            return "Processor did not generate output files."
+        required_cols = {"Data", "Ativo", "Quant", "PU", "SaldoBruto", "Caixa", "Moeda"}
+        for path in file_paths:
+            p = Path(path)
+            if p.suffix.lower() != ".csv":
+                continue
+            try:
+                import pandas as pd
+                df = pd.read_csv(str(p), sep=None, engine="python")
+                cols = set(map(str, df.columns))
+                missing = sorted(required_cols - cols)
+                if missing:
+                    return f"Processed output missing required columns: {', '.join(missing)}."
+                output_rows = len(df.index)
+                if output_rows == 0:
+                    return "Processed output generated 0 rows."
+                if (
+                    expected_input_rows is not None
+                    and expected_input_rows > 0
+                    and output_rows < expected_input_rows
+                ):
+                    return (
+                        "Data loss detected in processing: "
+                        f"input_rows={expected_input_rows}, output_rows={output_rows}. "
+                        "Output cannot have fewer rows than input."
+                    )
+                return None
+            except Exception as exc:
+                return f"Failed to validate processed CSV output: {exc}"
+        return None
+
+    @staticmethod
+    def resolve_job_processing_script(job: Job) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        script = None
+        processing_config = getattr(job, "processing_config_json", None)
+        if processing_config:
+            script, normalized = build_script_from_processing_config(processing_config)
+            if normalized is not None:
+                processing_config = normalized
+        if not script:
+            script = getattr(job, "processing_script", None)
+        if script:
+            script = str(script).strip()
+        if not script:
+            return None, processing_config if isinstance(processing_config, dict) else None
+        script = FileProcessorService._patch_legacy_visual_script(script)
+        snapshot = {
+            "processor_id": None,
+            "processor_version": None,
+            "processor_name": f"job:{job.name}",
+            "processor_script_snapshot": script,
+            "processor_source": "job",
+        }
+        return script, snapshot
+
+    @staticmethod
+    async def _append_processing_log(run_id: str, message: str) -> None:
+        run = await Run.get(run_id)
+        if not run:
+            return
+        timestamped = f"[{get_now().time()}] {message}"
+        await run.update({"$push": {"processing_logs": timestamped}})
+
+    @staticmethod
     async def process_files(
         run_id: str,
         credential_id: Optional[str],
@@ -55,7 +249,7 @@ class FileProcessorService:
         job_name: str = "job",
         script_override: Optional[str] = None,
         processor_snapshot_override: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[List[str], Optional[Dict[str, Any]]]:
+    ) -> Tuple[List[str], Optional[Dict[str, Any]], Optional[str]]:
         """
         Process files for a run using explicit script (job/snapshot).
         """
@@ -65,7 +259,8 @@ class FileProcessorService:
 
             if not processor_script:
                 logger.info("No script provided for run %s processing", run_id)
-                return [], None
+                await FileProcessorService._append_processing_log(run_id, "No script provided for processing")
+                return [], None, "No script provided for processing."
 
             credential = await Credential.get(credential_id) if credential_id else None
 
@@ -88,9 +283,19 @@ class FileProcessorService:
                 "selected_filename": selected_filename or "",
                 "selected_sheet": selected_sheet or "",
                 "source_excel_path": source_excel_path,
+                "report_date": "",
+                "history_date": "",
             }
+            run_doc = await Run.get(run_id)
+            if run_doc:
+                context["report_date"] = run_doc.report_date or ""
+                context["history_date"] = run_doc.history_date or ""
 
             logger.info("Executing script snapshot for run %s", run_id)
+            await FileProcessorService._append_processing_log(
+                run_id,
+                f"Executing processor script for file={selected_filename or '-'} sheet={selected_sheet or '-'}",
+            )
 
             processed_files = await FileProcessorService._execute_processor(
                 processor_script,
@@ -102,11 +307,33 @@ class FileProcessorService:
                 job_name=job_name,
             )
 
+            expected_input_rows = FileProcessorService._count_input_rows(
+                str(original_dir),
+                selected_filename,
+                selected_sheet,
+            )
+            validation_error = FileProcessorService._validate_processed_outputs(
+                renamed_files,
+                expected_input_rows=expected_input_rows,
+            )
+            if validation_error:
+                await FileProcessorService._append_processing_log(run_id, validation_error)
+                return [], processor_snapshot, validation_error
+
             logger.info("Processor completed: %s file(s) generated", len(renamed_files))
-            return renamed_files, processor_snapshot
+            await FileProcessorService._append_processing_log(
+                run_id,
+                f"Processing finished successfully. Output files: {len(renamed_files)}",
+            )
+            return renamed_files, processor_snapshot, None
         except Exception as exc:
             logger.error("File processing failed for run %s: %s", run_id, exc)
-            return [], None
+            detail = str(exc) or "Unknown processing error"
+            await FileProcessorService._append_processing_log(
+                run_id,
+                f"Processing failed: {detail}\n{traceback.format_exc()}",
+            )
+            return [], None, detail
 
     @staticmethod
     def _normalize_processed_names(file_paths: List[str], job_name: str) -> List[str]:
@@ -209,6 +436,10 @@ class FileProcessorService:
         job = await Job.get(job_id)
         if not run or not job:
             return "failed"
+        await FileProcessorService._append_processing_log(
+            run_id,
+            f"Starting auto-processing for job={job_id}",
+        )
 
         originals = FileProcessorService._original_files(run)
         if not originals:
@@ -249,8 +480,13 @@ class FileProcessorService:
                 )
                 return "failed"
 
-            if job.last_selected_sheet and job.last_selected_sheet in sheet_options:
-                selected_sheet = job.last_selected_sheet
+            preferred_sheet = FileProcessorService._pick_sheet_by_aliases(
+                sheet_options,
+                job.last_selected_sheet,
+                getattr(job, "sheet_aliases", []),
+            )
+            if preferred_sheet:
+                selected_sheet = preferred_sheet
             elif len(sheet_options) == 1:
                 selected_sheet = sheet_options[0]
             else:
@@ -273,15 +509,8 @@ class FileProcessorService:
 
         script_override = None
         snapshot_override = None
-        if getattr(job, "enable_processing", False) and getattr(job, "processing_script", None):
-            script_override = job.processing_script
-            snapshot_override = {
-                "processor_id": None,
-                "processor_version": None,
-                "processor_name": f"job:{job.name}",
-                "processor_script_snapshot": job.processing_script,
-                "processor_source": "job",
-            }
+        if getattr(job, "enable_processing", False):
+            script_override, snapshot_override = FileProcessorService.resolve_job_processing_script(job)
         if not script_override:
             await FileProcessorService._set_run_processing_state(
                 run,
@@ -291,7 +520,7 @@ class FileProcessorService:
                 processing_error="No processing script configured for this job.",
             )
             return "failed"
-        processed_paths, processor_snapshot = await FileProcessorService.process_files(
+        processed_paths, processor_snapshot, process_error = await FileProcessorService.process_files(
             run_id=run_id,
             credential_id=credential_id,
             selected_filename=selected_filename,
@@ -306,7 +535,7 @@ class FileProcessorService:
                 "failed",
                 selected_filename=selected_filename,
                 selected_sheet=selected_sheet,
-                processing_error="Processor did not generate output files.",
+                processing_error=process_error or "Processor did not generate output files.",
             )
             return "failed"
 
@@ -344,6 +573,10 @@ class FileProcessorService:
         if not run:
             return "failed"
         job = await Job.get(run.job_id) if run.job_id else None
+        await FileProcessorService._append_processing_log(
+            run_id,
+            f"Starting manual processing for file={filename} sheet={selected_sheet or '-'}",
+        )
         if not job:
             await FileProcessorService._set_run_processing_state(
                 run, "failed", processing_error="Run has no linked job."
@@ -370,13 +603,21 @@ class FileProcessorService:
                 )
                 return "pending_sheet_selection"
             if selected_sheet not in sheet_options:
-                await FileProcessorService._set_run_processing_state(
-                    run,
-                    "pending_sheet_selection",
-                    selected_filename=filename,
-                    processing_error=f"Sheet '{selected_sheet}' not found in {filename}.",
+                alias_sheet = FileProcessorService._pick_sheet_by_aliases(
+                    sheet_options,
+                    selected_sheet,
+                    getattr(job, "sheet_aliases", []),
                 )
-                return "pending_sheet_selection"
+                if alias_sheet:
+                    selected_sheet = alias_sheet
+                else:
+                    await FileProcessorService._set_run_processing_state(
+                        run,
+                        "pending_sheet_selection",
+                        selected_filename=filename,
+                        processing_error=f"Sheet '{selected_sheet}' not found in {filename}.",
+                    )
+                    return "pending_sheet_selection"
 
         acquired = await FileProcessorService._acquire_processing_lock(run_id)
         if not acquired:
@@ -397,19 +638,8 @@ class FileProcessorService:
         )
         local_script_override = script_override
         local_snapshot_override = processor_snapshot_override
-        if (
-            not local_script_override
-            and getattr(job, "enable_processing", False)
-            and getattr(job, "processing_script", None)
-        ):
-            local_script_override = job.processing_script
-            local_snapshot_override = {
-                "processor_id": None,
-                "processor_version": None,
-                "processor_name": f"job:{job.name}",
-                "processor_script_snapshot": job.processing_script,
-                "processor_source": "job",
-            }
+        if not local_script_override and getattr(job, "enable_processing", False):
+            local_script_override, local_snapshot_override = FileProcessorService.resolve_job_processing_script(job)
         if not local_script_override:
             await FileProcessorService._set_run_processing_state(
                 run,
@@ -419,7 +649,7 @@ class FileProcessorService:
                 processing_error="No processing script configured for this job.",
             )
             return "failed"
-        processed_paths, processor_snapshot = await FileProcessorService.process_files(
+        processed_paths, processor_snapshot, process_error = await FileProcessorService.process_files(
             run_id=run_id,
             credential_id=job.credential_id,
             selected_filename=filename,
@@ -434,7 +664,7 @@ class FileProcessorService:
                 "failed",
                 selected_filename=filename,
                 selected_sheet=selected_sheet,
-                processing_error="Processor did not generate output files.",
+                processing_error=process_error or "Processor did not generate output files.",
             )
             return "failed"
 
@@ -468,7 +698,7 @@ class FileProcessorService:
         """
         script_path = None
         wrapped_script = FileProcessorService._build_wrapped_script(script, context)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as handle:
             handle.write(wrapped_script)
             script_path = handle.name
 
@@ -512,6 +742,24 @@ class FileProcessorService:
         )
 
     @staticmethod
+    def _should_force_low_code(script: str) -> bool:
+        """
+        Treat script as low-code when it clearly expects wrapper-provided context.
+        This prevents false positives from helper `def` lines in visual scripts.
+        """
+        s = script or ""
+        markers = [
+            "VISUAL_BUILDER_",
+            "df_input",
+            "arquivo",
+            "aba",
+            "carteira",
+            "original_dir",
+            "processado_dir",
+        ]
+        return any(m in s for m in markers)
+
+    @staticmethod
     def _build_preamble_and_context(context: Dict) -> str:
         return "\n".join(
             [
@@ -544,6 +792,9 @@ class FileProcessorService:
                 "    m = re.search(r'(\\d{2})-(\\d{2})-(\\d{4})', str(nome or ''))",
                 "    if m:",
                 "        return f\"{m.group(1)}/{m.group(2)}/{m.group(3)}\"",
+                "    m = re.search(r'(\\d{2})(\\d{2})(\\d{4})', str(nome or ''))",
+                "    if m:",
+                "        return f\"{m.group(1)}/{m.group(2)}/{m.group(3)}\"",
                 "    return datetime.now().strftime('%d/%m/%Y')",
                 "",
                 "# Auto-generated context",
@@ -556,6 +807,8 @@ class FileProcessorService:
                 f"selected_filename = {context.get('selected_filename', '')!r}",
                 f"selected_sheet = {context.get('selected_sheet', '')!r}",
                 f"source_excel_path = {context.get('source_excel_path', '')!r}",
+                f"report_date = {context.get('report_date', '')!r}",
+                f"history_date = {context.get('history_date', '')!r}",
                 "",
                 "# Aliases em portugues",
                 "arquivo = selected_filename",
@@ -570,7 +823,10 @@ class FileProcessorService:
         preamble = FileProcessorService._build_preamble_and_context(context)
         normalized_script = (script or "").rstrip() + "\n"
 
-        if FileProcessorService._is_full_script(normalized_script):
+        if (
+            FileProcessorService._is_full_script(normalized_script)
+            and not FileProcessorService._should_force_low_code(normalized_script)
+        ):
             return f"{preamble}\n# User script (advanced mode)\n{normalized_script}"
 
         user_body = normalized_script.strip("\n")

@@ -21,6 +21,7 @@ interface Run {
     selected_sheet?: string | null;
     processing_error?: string | null;
     logs?: string[];
+    processing_logs?: string[];
 }
 
 interface ProcessingFileOption {
@@ -405,23 +406,21 @@ export default function Runs() {
                                 <th className="px-6 py-4">Executed At</th>
                                 <th className="px-6 py-4">Position Date</th>
                                 <th className="px-6 py-4">History Date</th>
-                                <th className="px-6 py-4">Run ID</th>
                                 <th className="px-6 py-4">Job Name</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Processing</th>
                                 <th className="px-6 py-4">Log</th>
-                                <th className="px-6 py-4">Node</th>
                                 <th className="px-6 py-4">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 text-sm">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={10} className="px-6 py-8 text-center text-slate-400">Loading history...</td>
+                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-400">Loading history...</td>
                                 </tr>
                             ) : runs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={10} className="px-6 py-8 text-center text-slate-500">No execution history found.</td>
+                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-500">No execution history found.</td>
                                 </tr>
                             ) : (
                                 runs.map((run) => (
@@ -438,7 +437,6 @@ export default function Runs() {
                                         </td>
                                         <td className="px-6 py-4 text-slate-300">{run.report_date || '-'}</td>
                                         <td className="px-6 py-4 text-slate-300">{run.history_date || '-'}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300">#{run.run_id.slice(0, 8)}</td>
                                         <td className="px-6 py-4 text-white">{run.job_name || run.connector}</td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusBadge(run.status)}`}>
@@ -467,7 +465,6 @@ export default function Runs() {
                                                 View Log
                                             </button>
                                         </td>
-                                        <td className="px-6 py-4 text-slate-400">{run.node}</td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-2">
                                                 <Link to={`/live/${run.run_id}`} className="text-brand-400 hover:text-brand-300 font-medium flex items-center">
@@ -625,6 +622,13 @@ export default function Runs() {
 {(logModalRun.logs || []).join('\n') || 'No logs available'}
                                 </pre>
                             )}
+                        </div>
+
+                        <div className="border border-white/10 rounded-lg p-3 bg-black/30">
+                            <p className="text-xs uppercase tracking-wide text-slate-300 mb-2">Processing Logs</p>
+                            <pre className="text-xs text-slate-200 whitespace-pre-wrap max-h-[55vh] overflow-y-auto">
+{(logModalRun.processing_logs || []).join('\n') || 'No processing logs available'}
+                            </pre>
                         </div>
                     </div>
                 </div>

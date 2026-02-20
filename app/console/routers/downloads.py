@@ -388,12 +388,23 @@ async def select_file_for_processing(run_id: str, payload: SelectFileRequest):
 
     if is_excel_filename(payload.filename):
         sheet_options = await get_excel_options(run_id, payload.filename)
+        current_aliases = list(getattr(job, "sheet_aliases", []) or [])
+
+        def _merge_aliases(values: List[str]) -> List[str]:
+            merged = list(current_aliases)
+            for v in values:
+                value = (v or "").strip()
+                if value and value.lower() not in [m.lower() for m in merged]:
+                    merged.append(value)
+            return merged
+
         if len(sheet_options) == 1:
             await job.update(
                 {
                     "$set": {
                         "last_selected_filename": payload.filename,
                         "last_selected_sheet": sheet_options[0],
+                        "sheet_aliases": _merge_aliases([sheet_options[0]]),
                         "selection_updated_at": get_now(),
                     }
                 }
@@ -418,6 +429,7 @@ async def select_file_for_processing(run_id: str, payload: SelectFileRequest):
                 "$set": {
                     "last_selected_filename": payload.filename,
                     "last_selected_sheet": None,
+                    "sheet_aliases": _merge_aliases(sheet_options),
                     "selection_updated_at": get_now(),
                 }
             }
@@ -466,11 +478,17 @@ async def select_sheet_for_processing(run_id: str, payload: SelectSheetRequest):
     if not job:
         raise HTTPException(status_code=400, detail="Run has no linked job")
 
+    current_aliases = list(getattr(job, "sheet_aliases", []) or [])
+    merged_aliases = list(current_aliases)
+    if payload.selected_sheet and payload.selected_sheet.lower() not in [m.lower() for m in merged_aliases]:
+        merged_aliases.append(payload.selected_sheet)
+
     await job.update(
         {
             "$set": {
                 "last_selected_filename": payload.filename,
                 "last_selected_sheet": payload.selected_sheet,
+                "sheet_aliases": merged_aliases,
                 "selection_updated_at": get_now(),
             }
         }

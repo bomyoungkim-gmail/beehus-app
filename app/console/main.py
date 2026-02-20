@@ -27,6 +27,10 @@ from core.schemas.otp import (
 )
 from app.console.schemas import JobCreate, JobResponse, JobUpdate, RunResponse
 from app.console.websockets import ConnectionManager
+from core.services.visual_processing import (
+    build_script_from_processing_config,
+    extract_visual_config_from_script,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +269,26 @@ async def create_job(job_in: JobCreate):
                 ),
             )
 
-    job = Job(**job_in.dict())
+    job_payload = job_in.dict()
+    processing_config = job_payload.get("processing_config_json")
+    if processing_config is not None:
+        generated_script, normalized_config = build_script_from_processing_config(processing_config)
+        if not normalized_config:
+            raise HTTPException(status_code=400, detail="Invalid processing_config_json payload.")
+        if normalized_config.get("mode") == "advanced" and not generated_script:
+            raise HTTPException(status_code=400, detail="Advanced processing script is empty.")
+        job_payload["processing_config_json"] = normalized_config
+        job_payload["processing_script"] = generated_script
+    elif job_payload.get("processing_script"):
+        script = str(job_payload["processing_script"]).strip()
+        job_payload["processing_script"] = script
+        visual_cfg = extract_visual_config_from_script(script)
+        if visual_cfg:
+            job_payload["processing_config_json"] = {"mode": "visual", "visual_config": visual_cfg}
+        else:
+            job_payload["processing_config_json"] = {"mode": "advanced", "advanced_script": script}
+
+    job = Job(**job_payload)
     await job.save()
     return job
 
@@ -299,11 +322,49 @@ async def update_job(job_id: str, job_update: JobUpdate):
     if job_update.enable_processing is not None:
         job.enable_processing = job_update.enable_processing
         if not job.enable_processing:
+            job.processing_config_json = None
             job.processing_script = None
+
+    if job_update.processing_config_json is not None:
+        script, normalized = build_script_from_processing_config(job_update.processing_config_json)
+        if not normalized:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid processing_config_json payload.",
+            )
+        if normalized.get("mode") == "advanced" and not script:
+            raise HTTPException(
+                status_code=400,
+                detail="Advanced processing script is empty.",
+            )
+        job.processing_config_json = normalized
+        job.processing_script = script
 
     if job_update.processing_script is not None:
         script = job_update.processing_script.strip()
         job.processing_script = script or None
+        if script:
+            visual_cfg = extract_visual_config_from_script(script)
+            if visual_cfg:
+                job.processing_config_json = {"mode": "visual", "visual_config": visual_cfg}
+            else:
+                job.processing_config_json = {"mode": "advanced", "advanced_script": script}
+        else:
+            job.processing_config_json = None
+
+    if job_update.sheet_aliases is not None:
+        normalized = []
+        seen = set()
+        for alias in job_update.sheet_aliases:
+            value = (alias or "").strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(value)
+        job.sheet_aliases = normalized
 
     await job.save()
     return job

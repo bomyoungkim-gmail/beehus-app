@@ -119,7 +119,9 @@ class Job(Document):
     holdings_date: Optional[str] = None  # Format: YYYY-MM-DD
     history_date: Optional[str] = None    # Format: YYYY-MM-DD
     enable_processing: bool = False
+    processing_config_json: Optional[dict] = None
     processing_script: Optional[str] = None
+    sheet_aliases: List[str] = Field(default_factory=list)
     last_selected_filename: Optional[str] = None
     last_selected_sheet: Optional[str] = None
     selection_updated_at: Optional[datetime] = None
@@ -158,6 +160,7 @@ class Run(Document):
     celery_task_id: Optional[str] = None  # For task cancellation
     error_summary: Optional[str] = None
     logs: List[str] = []
+    processing_logs: List[str] = Field(default_factory=list)
     vnc_url: Optional[str] = None
     report_date: Optional[str] = None  # Position Date (DD/MM/YYYY)
     history_date: Optional[str] = None  # History Date (DD/MM/YYYY)

@@ -5,8 +5,6 @@ Replaces SQLAlchemy/raw SQL implementation.
 
 import os
 import logging
-from motor.motor_asyncio import AsyncIOMotorClient
-from core.config import settings
 from core.models.mongo_models import Run
 from core.utils.date_utils import get_now
 
@@ -15,10 +13,11 @@ logger = logging.getLogger(__name__)
 
 class RunRepository:
     """Repository for managing Run documents and raw data"""
-    
-    def __init__(self):
-        self.mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-        self.mongo_db = self.mongo_client[settings.MONGO_DB_NAME]
+
+    @staticmethod
+    def _database():
+        # Reuse Beanie's active Motor database bound to the current event loop.
+        return Run.get_motor_collection().database
 
     async def save_run_status(self, run_id: str, status: str, error: str = None):
         """
@@ -84,7 +83,7 @@ class RunRepository:
         """
         Save raw scraping payload to MongoDB.
         """
-        await self.mongo_db.raw_payloads.insert_one(
+        await self._database().raw_payloads.insert_one(
             {
                 "run_id": str(run_id),
                 "url": url,
@@ -102,7 +101,7 @@ class RunRepository:
             screenshot_path: Path to screenshot file
             html_path: Path to HTML dump file
         """
-        await self.mongo_db.evidences.insert_one({
+        await self._database().evidences.insert_one({
             "run_id": run_id,
             "screenshot_path": screenshot_path,
             "html_path": html_path,

@@ -54,9 +54,9 @@ sudo chown -R $USER:$USER /opt/beehus-app
 cd /opt/beehus-app
 ```
 
-## 5. Configurar `.env` de producao
+## 5. Configurar `config/env/.env` de producao
 
-Crie/edite `/opt/beehus-app/.env`:
+Crie/edite `/opt/beehus-app/config/env/.env`:
 
 ```env
 MONGO_URI=mongodb://admin:adminpass@mongo:27017
@@ -193,7 +193,7 @@ docker compose logs -f app-console celery-worker frontend
 - Convite cria usuario mas nao envia email:
   - SMTP nao configurado ou bloqueado
 - Link de convite abre localhost:
-  - `FRONTEND_URL` incorreto no `.env`
+  - `FRONTEND_URL` incorreto em `config/env/.env`
 - Frontend nao chama API em producao:
   - `VITE_API_URL` errado no build do frontend
 - Erro CORS no browser:

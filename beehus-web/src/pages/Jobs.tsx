@@ -25,6 +25,8 @@ interface Job {
     history_lag_days?: number;
     holdings_date?: string;
     history_date?: string;
+    enable_processing?: boolean;
+    processing_script?: string;
 }
 
 interface Workspace {
@@ -38,6 +40,17 @@ interface Credential {
     workspace_id: string;
     label: string;
     username: string;
+}
+
+interface DownloadFileMetadata {
+    file_type: string;
+    filename: string;
+}
+
+interface DownloadRow {
+    run_id: string;
+    job_id: string;
+    files: DownloadFileMetadata[];
 }
 
 // Schedule presets for easy selection
@@ -55,6 +68,148 @@ const SCHEDULE_PRESETS = [
     { label: 'Weekly (Monday 9 AM)', value: '0 9 * * 1' },
     { label: 'Custom cron expression', value: 'custom' }
 ];
+
+const DEFAULT_PROCESSING_SCRIPT = `# process_file(df_input, arquivo, aba, carteira, original_dir, processado_dir)
+# Return a DataFrame with output columns.
+def process_file(df_input, arquivo, aba, carteira, original_dir, processado_dir):
+    out = df_input.copy()
+    if "Carteira" not in out.columns:
+        out["Carteira"] = carteira
+    return out
+`;
+
+interface VisualProcessorConfig {
+    ativo_mode: 'direct' | 'compose';
+    ativo_direct_cols: string;
+    ativo_comp_base_cols: string;
+    ativo_comp_part2_cols: string;
+    ativo_comp_part3_cols: string;
+    ativo_comp_part4_primary_cols: string;
+    ativo_comp_part4_fallback_cols: string;
+    ativo_separator: string;
+    quant_cols: string;
+    pu_cols: string;
+    saldo_bruto_cols: string;
+    caixa_cols: string;
+    moeda_fixa: string;
+    filter_zero_enabled: boolean;
+    filter_zero_cols: string;
+    filter_empty_enabled: boolean;
+    filter_empty_cols: string;
+    only_enabled: boolean;
+    only_cols: string;
+    only_mode: 'sim' | 'nao';
+    only_true_values: string;
+}
+
+const DEFAULT_VISUAL_CONFIG: VisualProcessorConfig = {
+    ativo_mode: 'direct',
+    ativo_direct_cols: 'Ativo, Nome Ativo',
+    ativo_comp_base_cols: 'Ativo Base, Ativo',
+    ativo_comp_part2_cols: 'Operacao, Operação',
+    ativo_comp_part3_cols: 'Emissor',
+    ativo_comp_part4_primary_cols: 'Vencimento',
+    ativo_comp_part4_fallback_cols: 'Codigo, Código',
+    ativo_separator: ' - ',
+    quant_cols: 'q, Quant, Quantidade',
+    pu_cols: 'pu, PU, Preco Unitario',
+    saldo_bruto_cols: 'sb, SaldoBruto, Saldo Bruto',
+    caixa_cols: 'Caixa, Eh Caixa, e_caixa',
+    moeda_fixa: 'BRL',
+    filter_zero_enabled: false,
+    filter_zero_cols: 'sb, SaldoBruto, Saldo Bruto',
+    filter_empty_enabled: false,
+    filter_empty_cols: 'Ativo, Nome Ativo',
+    only_enabled: false,
+    only_cols: 'Caixa, Eh Caixa, e_caixa',
+    only_mode: 'sim',
+    only_true_values: '1, true, sim, s, yes, y',
+};
+
+function buildVisualProcessorScript(cfg: VisualProcessorConfig): string {
+    const q = JSON.stringify;
+    const aliases = (value: string) =>
+        value
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean);
+    return `# VISUAL_BUILDER_JOB_V1
+df = df_input.copy() if df_input is not None else pd.DataFrame()
+df.columns = [str(c).strip() for c in df.columns]
+
+def pick_col(candidates):
+    lower_map = {str(c).strip().lower(): c for c in df.columns}
+    for name in candidates:
+        key = str(name).strip().lower()
+        if key in lower_map:
+            return lower_map[key]
+    return None
+
+def txt(candidates, default=""):
+    col = pick_col(candidates)
+    if col:
+        return df[col].astype(str).fillna("").str.strip()
+    return pd.Series([default] * len(df), index=df.index)
+
+def num(candidates, default=0.0):
+    col = pick_col(candidates)
+    if col:
+        return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    return pd.Series([default] * len(df), index=df.index)
+
+ativo_direct = txt(${q(aliases(cfg.ativo_direct_cols))})
+ativo_base = txt(${q(aliases(cfg.ativo_comp_base_cols))})
+ativo_p2 = txt(${q(aliases(cfg.ativo_comp_part2_cols))})
+ativo_p3 = txt(${q(aliases(cfg.ativo_comp_part3_cols))})
+ativo_p4_primary = txt(${q(aliases(cfg.ativo_comp_part4_primary_cols))})
+ativo_p4_fallback = txt(${q(aliases(cfg.ativo_comp_part4_fallback_cols))})
+qtd = num(${q(aliases(cfg.quant_cols))}, 0.0)
+pu = num(${q(aliases(cfg.pu_cols))}, 0.0)
+sb = num(${q(aliases(cfg.saldo_bruto_cols))}, 0.0)
+caixa_raw = txt(${q(aliases(cfg.caixa_cols))}).str.lower()
+caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])
+
+def _clean_text(v):
+    s = str(v).strip()
+    if s.lower() in ["", "-", "nan", "none"]:
+        return ""
+    return s
+
+def _join_non_empty(parts, sep):
+    vals = [_clean_text(x) for x in parts]
+    vals = [v for v in vals if v]
+    return sep.join(vals)
+
+if ${q(cfg.ativo_mode)} == "compose":
+    p4 = ativo_p4_primary.where(ativo_p4_primary.astype(str).str.strip().ne(""), ativo_p4_fallback)
+    ativo = pd.DataFrame({
+        "a": ativo_base,
+        "b": ativo_p2,
+        "c": ativo_p3,
+        "d": p4,
+    }).apply(lambda r: _join_non_empty([r["a"], r["b"], r["c"], r["d"]], ${q(cfg.ativo_separator || " - ")}), axis=1)
+else:
+    ativo = ativo_direct
+
+out = pd.DataFrame({
+    "Data": data_do_arquivo(arquivo),
+    "Ativo": ativo,
+    "Quant": qtd.where(~caixa, sb),
+    "PU": pu.where(~caixa, 1.0),
+    "SaldoBruto": sb,
+    "Caixa": caixa.map({True: "Sim", False: "Não"}),
+    "Moeda": ${q(cfg.moeda_fixa || "BRL")},
+})
+
+mask = pd.Series([True] * len(out), index=out.index)
+${cfg.filter_zero_enabled ? `fz = num(${q(aliases(cfg.filter_zero_cols))}, 0.0)\nmask &= fz.ne(0)` : "# sem filtro de zero"}
+${cfg.filter_empty_enabled ? `fe = txt(${q(aliases(cfg.filter_empty_cols))})\nmask &= fe.astype(str).str.strip().ne("")` : "# sem filtro de vazio"}
+${cfg.only_enabled ? `only_raw = txt(${q(aliases(cfg.only_cols))}).str.lower()\nonly_true = [x.strip().lower() for x in ${q(aliases(cfg.only_true_values))}]\nonly_flag = only_raw.isin(only_true)\nmask &= only_flag if ${q(cfg.only_mode)} == "sim" else ~only_flag` : "# sem filtro somente"}
+out = out.loc[mask].reset_index(drop=True)
+
+return out
+`;
+}
 
 export default function Jobs() {
     const [jobs, setJobs] = useState<Job[]>([]);
@@ -77,6 +232,31 @@ export default function Jobs() {
     const [deleteAllModal, setDeleteAllModal] = useState(false);
     const [viewParamsModal, setViewParamsModal] = useState<{ isOpen: boolean; job: Job | null }>({ 
         isOpen: false, job: null 
+    });
+    const [scriptModal, setScriptModal] = useState<{
+        isOpen: boolean;
+        job: Job | null;
+        tab: 'visual' | 'advanced';
+        script: string;
+    }>({
+        isOpen: false,
+        job: null,
+        tab: 'visual',
+        script: DEFAULT_PROCESSING_SCRIPT,
+    });
+    const [visualConfig, setVisualConfig] = useState<VisualProcessorConfig>(DEFAULT_VISUAL_CONFIG);
+    const [savingScript, setSavingScript] = useState(false);
+    const [mappingPreview, setMappingPreview] = useState<{
+        loading: boolean;
+        runId?: string;
+        filename?: string;
+        selectedSheet?: string;
+        columns: string[];
+        matches: Array<{ output: string; aliases: string[]; matched?: string }>;
+    }>({
+        loading: false,
+        columns: [],
+        matches: [],
     });
 
     const { showToast } = useToast();
@@ -202,7 +382,7 @@ export default function Jobs() {
                     return;
                 }
             }
-            
+
             // Determine final schedule value and normalize (remove extra spaces)
         let finalSchedule = scheduleType === 'custom' ? customCron : scheduleType;
         if (finalSchedule) {
@@ -253,6 +433,170 @@ export default function Jobs() {
         } catch (error) {
             showToast('Error triggering job', 'error');
             console.error(error);
+        }
+    };
+
+    const toggleJobProcessing = async (job: Job, checked: boolean) => {
+        try {
+            await axios.patch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs/${job.id}`, {
+                enable_processing: checked,
+            });
+            setJobs(prev =>
+                prev.map(j =>
+                    j.id === job.id
+                        ? {
+                            ...j,
+                            enable_processing: checked,
+                            processing_script: checked ? j.processing_script : undefined,
+                        }
+                        : j
+                )
+            );
+            showToast(`Processing ${checked ? 'enabled' : 'disabled'} for "${job.name}"`, 'success');
+        } catch (error) {
+            showToast('Error updating processing flag', 'error');
+            console.error(error);
+        }
+    };
+
+    const openScriptEditor = (job: Job) => {
+        setVisualConfig(DEFAULT_VISUAL_CONFIG);
+        setMappingPreview({
+            loading: false,
+            columns: [],
+            matches: [],
+        });
+        setScriptModal({
+            isOpen: true,
+            job,
+            tab: 'visual',
+            script: job.processing_script || DEFAULT_PROCESSING_SCRIPT,
+        });
+    };
+
+    const saveJobScript = async () => {
+        if (!scriptModal.job) return;
+        if (!scriptModal.script.trim()) {
+            showToast('Script vazio. Preencha antes de salvar.', 'error');
+            return;
+        }
+
+        setSavingScript(true);
+        try {
+            const res = await axios.patch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs/${scriptModal.job.id}`, {
+                enable_processing: true,
+                processing_script: scriptModal.script,
+            });
+            const updated = res.data as Job;
+            setJobs(prev => prev.map(j => (j.id === updated.id ? updated : j)));
+            showToast('Script salvo no job', 'success');
+            setScriptModal(prev => ({ ...prev, isOpen: false, job: null }));
+        } catch (error) {
+            showToast('Error saving script', 'error');
+            console.error(error);
+        } finally {
+            setSavingScript(false);
+        }
+    };
+
+    const splitAliases = (text: string): string[] =>
+        text
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean);
+
+    const findMatchedColumn = (columns: string[], aliases: string[]): string | undefined => {
+        const lowerMap = new Map(columns.map((c) => [c.toLowerCase(), c]));
+        for (const alias of aliases) {
+            const hit = lowerMap.get(alias.toLowerCase());
+            if (hit) return hit;
+        }
+        return undefined;
+    };
+
+    const testMappingWithLatestDownload = async () => {
+        if (!scriptModal.job) return;
+        setMappingPreview({
+            loading: true,
+            columns: [],
+            matches: [],
+        });
+
+        try {
+            const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+            const downloadsRes = await axios.get<DownloadRow[]>(`${apiBase}/downloads`, {
+                params: { limit: 200 },
+            });
+            const latest = downloadsRes.data.find(
+                (d) => d.job_id === scriptModal.job?.id && (d.files || []).some((f) => f.file_type === 'original'),
+            );
+            if (!latest) {
+                showToast('Nao encontrei download bruto para este job.', 'error');
+                setMappingPreview({ loading: false, columns: [], matches: [] });
+                return;
+            }
+
+            const original = latest.files.find((f) => f.file_type === 'original');
+            if (!original) {
+                showToast('Run encontrado sem arquivo bruto.', 'error');
+                setMappingPreview({ loading: false, columns: [], matches: [] });
+                return;
+            }
+
+            let selectedSheet: string | undefined;
+            if (/\.(xlsx|xlsm|xls)$/i.test(original.filename)) {
+                const sheetsRes = await axios.get<string[]>(`${apiBase}/downloads/${latest.run_id}/processing/excel-options`, {
+                    params: { filename: original.filename },
+                });
+                if (sheetsRes.data.length > 0) {
+                    selectedSheet = sheetsRes.data[0];
+                }
+            }
+
+            const colsRes = await axios.get<{ columns: string[] }>(
+                `${apiBase}/downloads/${latest.run_id}/processing/columns`,
+                {
+                    params: {
+                        filename: original.filename,
+                        selected_sheet: selectedSheet,
+                    },
+                },
+            );
+            const cols = colsRes.data.columns || [];
+            const ativoAliases =
+                visualConfig.ativo_mode === 'compose'
+                    ? [
+                          ...splitAliases(visualConfig.ativo_comp_base_cols),
+                          ...splitAliases(visualConfig.ativo_comp_part2_cols),
+                          ...splitAliases(visualConfig.ativo_comp_part3_cols),
+                          ...splitAliases(visualConfig.ativo_comp_part4_primary_cols),
+                          ...splitAliases(visualConfig.ativo_comp_part4_fallback_cols),
+                      ]
+                    : splitAliases(visualConfig.ativo_direct_cols);
+            const matches = [
+                { output: 'Ativo', aliases: ativoAliases },
+                { output: 'Quant', aliases: splitAliases(visualConfig.quant_cols) },
+                { output: 'PU', aliases: splitAliases(visualConfig.pu_cols) },
+                { output: 'SaldoBruto', aliases: splitAliases(visualConfig.saldo_bruto_cols) },
+                { output: 'Caixa', aliases: splitAliases(visualConfig.caixa_cols) },
+            ].map((row) => ({
+                ...row,
+                matched: findMatchedColumn(cols, row.aliases),
+            }));
+
+            setMappingPreview({
+                loading: false,
+                runId: latest.run_id,
+                filename: original.filename,
+                selectedSheet,
+                columns: cols,
+                matches,
+            });
+            showToast('Preview de mapeamento gerado.', 'success');
+        } catch (error) {
+            console.error(error);
+            showToast('Falha ao testar mapeamento no ultimo download.', 'error');
+            setMappingPreview({ loading: false, columns: [], matches: [] });
         }
     };
 
@@ -360,6 +704,7 @@ export default function Jobs() {
                                 <th className="px-6 py-4">Schedule</th>
                                 <th className="px-6 py-4">Posição</th>
                                 <th className="px-6 py-4">Histórico</th>
+                                <th className="px-6 py-4">Processing</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Actions</th>
                             </tr>
@@ -367,13 +712,13 @@ export default function Jobs() {
                         <tbody className="divide-y divide-white/5 text-sm">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-400">
+                                    <td colSpan={9} className="px-6 py-8 text-center text-slate-400">
                                         Loading jobs...
                                     </td>
                                 </tr>
                             ) : jobs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="px-6 py-8 text-center text-slate-500">
+                                    <td colSpan={9} className="px-6 py-8 text-center text-slate-500">
                                         No jobs yet. Create your first job!
                                     </td>
                                 </tr>
@@ -421,6 +766,27 @@ export default function Jobs() {
                                             ) : (
                                                 <span className="text-slate-500 text-xs">-</span>
                                             )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-3">
+                                                <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={!!job.enable_processing}
+                                                        onChange={(e) => toggleJobProcessing(job, e.target.checked)}
+                                                        className="rounded border-white/20 bg-dark-surface"
+                                                    />
+                                                    <span>{job.enable_processing ? 'True' : 'False'}</span>
+                                                </label>
+                                                {job.enable_processing && (
+                                                    <button
+                                                        onClick={() => openScriptEditor(job)}
+                                                        className="text-brand-400 hover:text-brand-300 text-xs font-medium"
+                                                    >
+                                                        Script
+                                                    </button>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4">
                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${getStatusBadge(job.status)}`}>
@@ -951,6 +1317,8 @@ export default function Jobs() {
     ...viewParamsModal.job.params,
     export_holdings: viewParamsModal.job.export_holdings ?? true,
     export_history: viewParamsModal.job.export_history ?? false,
+    enable_processing: viewParamsModal.job.enable_processing ?? false,
+    processing_script: (viewParamsModal.job.processing_script || '').slice(0, 200),
     date_mode: viewParamsModal.job.date_mode ?? 'lag',
     ...((viewParamsModal.job.date_mode ?? 'lag') === 'lag' ? {
         holdings_lag_days: viewParamsModal.job.holdings_lag_days ?? 1,
@@ -961,6 +1329,198 @@ export default function Jobs() {
     })
 }, null, 2)}
                             </pre>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {scriptModal.isOpen && scriptModal.job && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                    <div className="glass border border-white/10 rounded-xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
+                        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-white">Script Editor</h3>
+                                <p className="text-xs text-slate-400">{scriptModal.job.name}</p>
+                            </div>
+                            <button
+                                onClick={() => setScriptModal(prev => ({ ...prev, isOpen: false, job: null }))}
+                                className="text-slate-400 hover:text-white transition-colors"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="p-4 border-b border-white/10 flex items-center gap-2">
+                            <button
+                                onClick={() => setScriptModal(prev => ({ ...prev, tab: 'visual' }))}
+                                className={`px-3 py-1.5 rounded text-sm ${scriptModal.tab === 'visual' ? 'bg-brand-600 text-white' : 'bg-white/5 text-slate-300'}`}
+                            >
+                                Visual
+                            </button>
+                            <button
+                                onClick={() => setScriptModal(prev => ({ ...prev, tab: 'advanced' }))}
+                                className={`px-3 py-1.5 rounded text-sm ${scriptModal.tab === 'advanced' ? 'bg-brand-600 text-white' : 'bg-white/5 text-slate-300'}`}
+                            >
+                                Advanced
+                            </button>
+                        </div>
+
+                        <div className="p-4 overflow-auto space-y-4">
+                            {scriptModal.tab === 'visual' && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-white/10 rounded-lg p-4 bg-white/5">
+                                    <p className="md:col-span-2 text-xs text-slate-400">
+                                        Associe cada campo de <span className="text-slate-200 font-semibold">Saida</span> para uma lista de colunas de <span className="text-slate-200 font-semibold">Entrada</span> (separadas por virgula). O sistema usa a primeira coluna encontrada.
+                                    </p>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Saida: Ativo</label>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-3 text-xs text-slate-300">
+                                                <label className="flex items-center gap-1">
+                                                    <input type="radio" checked={visualConfig.ativo_mode === 'direct'} onChange={() => setVisualConfig({ ...visualConfig, ativo_mode: 'direct' })} />
+                                                    Direto
+                                                </label>
+                                                <label className="flex items-center gap-1">
+                                                    <input type="radio" checked={visualConfig.ativo_mode === 'compose'} onChange={() => setVisualConfig({ ...visualConfig, ativo_mode: 'compose' })} />
+                                                    Compor
+                                                </label>
+                                            </div>
+                                            {visualConfig.ativo_mode === 'direct' ? (
+                                                <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Entrada(s): Ativo, Nome Ativo" value={visualConfig.ativo_direct_cols} onChange={(e) => setVisualConfig({ ...visualConfig, ativo_direct_cols: e.target.value })} />
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Parte 1 (base): Ativo Base, Ativo" value={visualConfig.ativo_comp_base_cols} onChange={(e) => setVisualConfig({ ...visualConfig, ativo_comp_base_cols: e.target.value })} />
+                                                    <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Parte 2 (opcional): Operacao, Operação" value={visualConfig.ativo_comp_part2_cols} onChange={(e) => setVisualConfig({ ...visualConfig, ativo_comp_part2_cols: e.target.value })} />
+                                                    <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Parte 3 (opcional): Emissor" value={visualConfig.ativo_comp_part3_cols} onChange={(e) => setVisualConfig({ ...visualConfig, ativo_comp_part3_cols: e.target.value })} />
+                                                    <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Parte 4 primaria: Vencimento" value={visualConfig.ativo_comp_part4_primary_cols} onChange={(e) => setVisualConfig({ ...visualConfig, ativo_comp_part4_primary_cols: e.target.value })} />
+                                                    <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Parte 4 fallback: Codigo, Código" value={visualConfig.ativo_comp_part4_fallback_cols} onChange={(e) => setVisualConfig({ ...visualConfig, ativo_comp_part4_fallback_cols: e.target.value })} />
+                                                    <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Separador (ex:  - )" value={visualConfig.ativo_separator} onChange={(e) => setVisualConfig({ ...visualConfig, ativo_separator: e.target.value })} />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Saida: Quant</label>
+                                        <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Entrada(s): q, Quant, Quantidade" value={visualConfig.quant_cols} onChange={(e) => setVisualConfig({ ...visualConfig, quant_cols: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Saida: PU</label>
+                                        <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Entrada(s): pu, PU, Preco Unitario" value={visualConfig.pu_cols} onChange={(e) => setVisualConfig({ ...visualConfig, pu_cols: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Saida: SaldoBruto</label>
+                                        <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Entrada(s): sb, SaldoBruto, Saldo Bruto" value={visualConfig.saldo_bruto_cols} onChange={(e) => setVisualConfig({ ...visualConfig, saldo_bruto_cols: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Saida: Caixa</label>
+                                        <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Entrada(s): Caixa, Eh Caixa, e_caixa" value={visualConfig.caixa_cols} onChange={(e) => setVisualConfig({ ...visualConfig, caixa_cols: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-400 mb-1">Saida: Moeda</label>
+                                        <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Valor fixo (ex: BRL)" value={visualConfig.moeda_fixa} onChange={(e) => setVisualConfig({ ...visualConfig, moeda_fixa: e.target.value })} />
+                                    </div>
+                                    <div className="md:col-span-2 border border-white/10 rounded p-3 bg-black/20 space-y-2">
+                                        <p className="text-xs text-slate-300 font-semibold">Filtros de Linha</p>
+                                        <label className="flex items-center gap-2 text-xs text-slate-300">
+                                            <input type="checkbox" checked={visualConfig.filter_zero_enabled} onChange={(e) => setVisualConfig({ ...visualConfig, filter_zero_enabled: e.target.checked })} />
+                                            Ignorar [campo] zero
+                                        </label>
+                                        {visualConfig.filter_zero_enabled && (
+                                            <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Campos para zero: sb, SaldoBruto" value={visualConfig.filter_zero_cols} onChange={(e) => setVisualConfig({ ...visualConfig, filter_zero_cols: e.target.value })} />
+                                        )}
+
+                                        <label className="flex items-center gap-2 text-xs text-slate-300">
+                                            <input type="checkbox" checked={visualConfig.filter_empty_enabled} onChange={(e) => setVisualConfig({ ...visualConfig, filter_empty_enabled: e.target.checked })} />
+                                            Ignorar [campo] vazio
+                                        </label>
+                                        {visualConfig.filter_empty_enabled && (
+                                            <input className="w-full bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Campos para vazio: Ativo, Nome Ativo" value={visualConfig.filter_empty_cols} onChange={(e) => setVisualConfig({ ...visualConfig, filter_empty_cols: e.target.value })} />
+                                        )}
+
+                                        <label className="flex items-center gap-2 text-xs text-slate-300">
+                                            <input type="checkbox" checked={visualConfig.only_enabled} onChange={(e) => setVisualConfig({ ...visualConfig, only_enabled: e.target.checked })} />
+                                            Somente [campo]
+                                        </label>
+                                        {visualConfig.only_enabled && (
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                                <input className="bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Campo(s): Caixa, Eh Caixa" value={visualConfig.only_cols} onChange={(e) => setVisualConfig({ ...visualConfig, only_cols: e.target.value })} />
+                                                <select className="bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" value={visualConfig.only_mode} onChange={(e) => setVisualConfig({ ...visualConfig, only_mode: e.target.value as 'sim' | 'nao' })}>
+                                                    <option value="sim">permitir true/sim</option>
+                                                    <option value="nao">permitir false/nao</option>
+                                                </select>
+                                                <input className="bg-dark-surface border border-white/10 rounded px-3 py-2 text-sm text-white" placeholder="Valores true: 1, true, sim, s" value={visualConfig.only_true_values} onChange={(e) => setVisualConfig({ ...visualConfig, only_true_values: e.target.value })} />
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    const generated = buildVisualProcessorScript(visualConfig);
+                                                    setScriptModal(prev => ({ ...prev, script: generated, tab: 'advanced' }));
+                                                }}
+                                                className="bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded text-sm"
+                                            >
+                                                Gerar Preview no Advanced
+                                            </button>
+                                            <button
+                                                onClick={testMappingWithLatestDownload}
+                                                disabled={mappingPreview.loading}
+                                                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded text-sm disabled:opacity-60"
+                                            >
+                                                {mappingPreview.loading ? 'Testando...' : 'Testar no ultimo download'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {mappingPreview.columns.length > 0 && (
+                                        <div className="md:col-span-2 border border-white/10 rounded-lg p-3 bg-black/20">
+                                            <p className="text-xs text-slate-300 mb-2">
+                                                Fonte: run <span className="font-mono">{mappingPreview.runId}</span> | arquivo <span className="font-mono">{mappingPreview.filename}</span>
+                                                {mappingPreview.selectedSheet ? ` | aba ${mappingPreview.selectedSheet}` : ''}
+                                            </p>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                {mappingPreview.matches.map((m) => (
+                                                    <div key={m.output} className="text-xs text-slate-300">
+                                                        <span className="text-slate-400">Saida {m.output}:</span>{' '}
+                                                        {m.matched ? (
+                                                            <span className="text-emerald-300 font-mono">{m.matched}</span>
+                                                        ) : (
+                                                            <span className="text-amber-300">nao encontrou ({m.aliases.join(', ')})</span>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <p className="text-xs text-slate-500 mt-2">
+                                                Colunas detectadas: {mappingPreview.columns.join(', ')}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            <textarea
+                                value={scriptModal.script}
+                                onChange={(e) => setScriptModal(prev => ({ ...prev, script: e.target.value }))}
+                                className="w-full min-h-[360px] bg-dark-surface border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand-500 font-mono text-sm"
+                                placeholder="Python processor script..."
+                            />
+                        </div>
+
+                        <div className="p-4 border-t border-white/10 flex items-center justify-end gap-3">
+                            <button
+                                onClick={() => setScriptModal(prev => ({ ...prev, isOpen: false, job: null }))}
+                                className="bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={saveJobScript}
+                                disabled={savingScript}
+                                className="bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded disabled:opacity-50"
+                            >
+                                {savingScript ? 'Saving...' : 'Save Script'}
+                            </button>
                         </div>
                     </div>
                 </div>

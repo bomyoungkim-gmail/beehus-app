@@ -3,6 +3,9 @@
 
 name: beehus-app
 
+x-app-env-file: &app-env-file
+  - ./config/env/.env
+
 x-chrome-node-env: &chrome-node-env
   SE_EVENT_BUS_HOST: selenium-hub
   SE_EVENT_BUS_PUBLISH_PORT: 4442
@@ -105,7 +108,7 @@ services:
   celery-worker:
     build:
       context: .
-      dockerfile: Dockerfile.worker
+      dockerfile: docker/Dockerfile.worker
     # Reduced concurrency to 1 for memory optimization (jobs are I/O bound)
     command: celery -A core.celery_app worker --concurrency=1 --loglevel=info
     restart: unless-stopped
@@ -117,8 +120,7 @@ services:
       - .:/app
       - ./artifacts:/app/artifacts
       - ${DOWNLOADS_DIR:-./downloads}:/downloads
-    env_file:
-      - .env
+    env_file: *app-env-file
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -129,13 +131,14 @@ services:
 
   # Celery Beat (scheduler)
   celery-beat:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
     command: celery -A django_config beat --loglevel=info -S core.celery_scheduler.MongoScheduler
     restart: unless-stopped
     volumes:
       - .:/app
-    env_file:
-      - .env
+    env_file: *app-env-file
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -161,15 +164,16 @@ services:
   #     - scrape-net
 
   app-console:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
     command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
       - .:/app
-    env_file:
-      - .env
+    env_file: *app-env-file
     depends_on:
       mongo:
         condition: service_healthy

@@ -21,6 +21,8 @@ class JobCreate(BaseModel):
     history_lag_days: int = 2
     holdings_date: Optional[str] = None
     history_date: Optional[str] = None
+    enable_processing: bool = False
+    processing_script: Optional[str] = None
 
     @field_validator("credential_id", mode="before")
     @classmethod
@@ -39,6 +41,11 @@ class JobResponse(JobCreate):
     
     class Config:
         from_attributes = True
+
+
+class JobUpdate(BaseModel):
+    enable_processing: Optional[bool] = None
+    processing_script: Optional[str] = None
 
 class RunResponse(BaseModel):
     id: str
@@ -59,27 +66,3 @@ class RunResponse(BaseModel):
     
     class Config:
         from_attributes = True
-
-
-class ProcessorCreate(BaseModel):
-    credential_id: str
-    name: str
-    script_content: str
-
-
-class ProcessorUpdate(BaseModel):
-    name: Optional[str] = None
-    script_content: Optional[str] = None
-    is_active: Optional[bool] = None
-
-
-class ProcessorResponse(BaseModel):
-    id: str
-    credential_id: str
-    name: str
-    version: int
-    processor_type: str
-    is_active: bool
-    created_at: str
-    updated_at: str
-    script_preview: str

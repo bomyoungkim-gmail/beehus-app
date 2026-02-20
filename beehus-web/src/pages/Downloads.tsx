@@ -11,6 +11,11 @@ interface FileMetadata {
     size_bytes?: number;
     status: string;
     is_latest?: boolean;
+    processor_id?: string;
+    processor_version?: number;
+    processor_name?: string;
+    processor_script_snapshot?: string;
+    processor_source?: string;
 }
 
 interface DownloadItem {
@@ -26,6 +31,20 @@ interface DownloadItem {
 export default function Downloads() {
     const [downloads, setDownloads] = useState<DownloadItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [reprocessingKey, setReprocessingKey] = useState<string>("");
+    const [scriptModal, setScriptModal] = useState<{
+        open: boolean;
+        filename: string;
+        processorName?: string;
+        processorVersion?: number;
+        script?: string;
+    }>({
+        open: false,
+        filename: '',
+        processorName: '',
+        processorVersion: undefined,
+        script: '',
+    });
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -81,6 +100,24 @@ export default function Downloads() {
         return `${(kb / 1024).toFixed(1)} MB`;
     };
 
+    const handleReprocessFromScript = async (runId: string, processedFilename: string) => {
+        const key = `${runId}:${processedFilename}`;
+        setReprocessingKey(key);
+        try {
+            await axios.post(
+                `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/downloads/${runId}/processing/reprocess-from-processed`,
+                { processed_filename: processedFilename },
+            );
+            showToast('Reprocessamento iniciado com script historico', 'success');
+            await fetchDownloads();
+        } catch (error) {
+            console.error('Reprocessing failed:', error);
+            showToast('Falha ao reprocessar com script historico', 'error');
+        } finally {
+            setReprocessingKey("");
+        }
+    };
+
     const formatRunDate = (createdAt: string) => {
         return formatDateTime(createdAt, {
             day: '2-digit',
@@ -92,6 +129,7 @@ export default function Downloads() {
     };
 
     return (
+        <>
         <Layout>
             <div className="p-8 max-w-7xl mx-auto space-y-8">
                 <header>
@@ -169,19 +207,56 @@ export default function Downloads() {
                                                 {processedFiles.length > 0 ? (
                                                     <div className="flex flex-col gap-2">
                                                         {processedFiles.map((file) => (
-                                                            <button
-                                                                key={file.path}
-                                                                onClick={() => handleDownload(item.run_id, 'processed', file.filename)}
-                                                                className="text-green-400 hover:text-green-300 font-medium flex items-center gap-2"
-                                                            >
-                                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                                                </svg>
-                                                                <div className="text-left">
-                                                                    <div>{file.filename}</div>
-                                                                    <div className="text-xs text-slate-500">{formatFileSize(file.size_bytes)}</div>
-                                                                </div>
-                                                            </button>
+                                                            <div key={file.path} className="flex items-start gap-3">
+                                                                <button
+                                                                    onClick={() => handleDownload(item.run_id, 'processed', file.filename)}
+                                                                    className="text-green-400 hover:text-green-300 font-medium flex items-center gap-2"
+                                                                >
+                                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                    </svg>
+                                                                    <div className="text-left">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span>{file.filename}</span>
+                                                                            {typeof file.processor_version === 'number' && (
+                                                                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                                                                                    v{file.processor_version}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="text-xs text-slate-500">{formatFileSize(file.size_bytes)}</div>
+                                                                    </div>
+                                                                </button>
+                                                                {file.processor_script_snapshot && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() =>
+                                                                            setScriptModal({
+                                                                                open: true,
+                                                                                filename: file.filename,
+                                                                                processorName: file.processor_name,
+                                                                                processorVersion: file.processor_version,
+                                                                                script: file.processor_script_snapshot,
+                                                                            })
+                                                                        }
+                                                                        className="px-2 py-1 rounded border border-white/20 text-xs text-slate-300 hover:bg-white/10"
+                                                                    >
+                                                                        Ver script
+                                                                    </button>
+                                                                )}
+                                                                {file.processor_script_snapshot && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleReprocessFromScript(item.run_id, file.filename)}
+                                                                        disabled={reprocessingKey === `${item.run_id}:${file.filename}`}
+                                                                        className="px-2 py-1 rounded border border-cyan-500/40 text-xs text-cyan-200 hover:bg-cyan-500/10 disabled:opacity-60"
+                                                                    >
+                                                                        {reprocessingKey === `${item.run_id}:${file.filename}`
+                                                                            ? 'Reprocessando...'
+                                                                            : 'Reprocessar c/ script'}
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         ))}
                                                     </div>
                                                 ) : (
@@ -197,5 +272,34 @@ export default function Downloads() {
                 </div>
             </div>
         </Layout>
+        {scriptModal.open && (
+            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+                <div className="glass p-6 rounded-xl border border-white/10 w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                        <div>
+                            <h4 className="text-xl font-bold text-white">Script Utilizado</h4>
+                            <p className="text-sm text-slate-400">
+                                {scriptModal.processorName || 'Processor'}
+                                {typeof scriptModal.processorVersion === 'number'
+                                    ? ` v${scriptModal.processorVersion}`
+                                    : ''}
+                                {` - ${scriptModal.filename}`}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setScriptModal({ open: false, filename: '', processorName: '', processorVersion: undefined, script: '' })}
+                            className="px-3 py-2 bg-white/10 text-white rounded hover:bg-white/20 text-sm"
+                        >
+                            Fechar
+                        </button>
+                    </div>
+                    <pre className="bg-[#1e1e1e] text-slate-100 rounded-lg p-4 text-xs overflow-auto whitespace-pre-wrap">
+                        {scriptModal.script || '# Script snapshot indisponivel'}
+                    </pre>
+                </div>
+            </div>
+        )}
+        </>
     );
 }

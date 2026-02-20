@@ -25,7 +25,7 @@ from core.schemas.otp import (
     InboxIntegrationCreate, InboxIntegrationResponse,
     OtpRuleCreate, OtpRuleResponse
 )
-from app.console.schemas import JobCreate, JobResponse, RunResponse
+from app.console.schemas import JobCreate, JobResponse, JobUpdate, RunResponse
 from app.console.websockets import ConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -129,12 +129,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.console.routers import auth, credentials, users, downloads, processors
+from app.console.routers import auth, credentials, users, downloads
 app.include_router(auth.router)
 app.include_router(credentials.router)
 app.include_router(users.router)
 app.include_router(downloads.router)
-app.include_router(processors.router)
 
 
 # ============================================================================
@@ -287,6 +286,26 @@ async def get_job(job_id: str):
     job = await Job.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.patch("/jobs/{job_id}", response_model=JobResponse)
+async def update_job(job_id: str, job_update: JobUpdate):
+    """Update mutable fields for a job."""
+    job = await Job.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job_update.enable_processing is not None:
+        job.enable_processing = job_update.enable_processing
+        if not job.enable_processing:
+            job.processing_script = None
+
+    if job_update.processing_script is not None:
+        script = job_update.processing_script.strip()
+        job.processing_script = script or None
+
+    await job.save()
     return job
 
 

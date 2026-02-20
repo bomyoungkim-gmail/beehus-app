@@ -303,6 +303,42 @@ class FileManager:
             return None
 
     @staticmethod
+    def append_date_suffix(file_path: str, date_ddmmyyyy: str, suffix: str = "") -> Optional[str]:
+        """
+        Keep original filename and append "-DDMMYYYY" before extension.
+        Example: "report.xlsx" -> "report-19022026.xlsx"
+        """
+        try:
+            path = Path(file_path)
+            date_token = re.sub(r"[^0-9]", "", (date_ddmmyyyy or "").strip())
+            if len(date_token) != 8:
+                logger.warning("Invalid date token for suffix: %s", date_ddmmyyyy)
+                return str(path)
+
+            safe_suffix = FileManager._safe_component(suffix, "")
+            stem = path.stem
+            extension = path.suffix
+
+            base_name = f"{stem}-{date_token}"
+            if safe_suffix:
+                base_name = f"{base_name}-{safe_suffix}"
+            new_path = path.parent / f"{base_name}{extension}"
+
+            counter = 1
+            while new_path.exists() and new_path != path:
+                new_path = path.parent / f"{base_name}-{counter}{extension}"
+                counter += 1
+
+            if new_path != path:
+                path.rename(new_path)
+                logger.info("Renamed with date suffix: %s -> %s", path.name, new_path.name)
+                return str(new_path)
+            return str(path)
+        except Exception as e:
+            logger.error("Failed to append date suffix to file %s: %s", file_path, e)
+            return str(file_path)
+
+    @staticmethod
     def process_file(original_path: str, run_id: str, metadata: Dict[str, str], suffix: str = "") -> Optional[str]:
         """
         Process file into standardized format.

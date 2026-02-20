@@ -17,6 +17,7 @@ import shutil
 import asyncio
 import logging
 from datetime import datetime
+import re
 from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,40 @@ SELENIUM_MAX_SLOTS = max(
     settings.SELENIUM_MAX_SLOTS,
     settings.SELENIUM_NODE_COUNT * settings.SELENIUM_NODE_MAX_SESSIONS,
 )
+
+
+def _to_ddmmyyyy(value: str | None) -> str | None:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    # 19/02/2026 or 19-02-2026
+    m = re.match(r"^(\d{2})[/-](\d{2})[/-](\d{4})$", s)
+    if m:
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+    # 2026-02-19
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
+    if m:
+        return f"{m.group(3)}{m.group(2)}{m.group(1)}"
+    # 19022026
+    digits = re.sub(r"\D", "", s)
+    if len(digits) == 8:
+        return digits
+    return None
+
+
+def _is_history_file(filename: str) -> bool:
+    name = (filename or "").lower()
+    history_markers = [
+        "extrato",
+        "historico",
+        "historico",
+        "history",
+        "transaction",
+        "moviment",
+    ]
+    return any(marker in name for marker in history_markers)
 
 
 async def _ensure_selenium_slots(redis_client) -> None:
@@ -345,23 +380,33 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     )
 
                     if original_paths:
-                        metadata = {
-                            "bank": connector_name.replace("conn_", "").replace("_", " ").title(),
-                            "account": (
-                                params_with_context.get("conta")
-                                or params_with_context.get("conta_corrente")
-                                or params_with_context.get("account")
-                                or "0000"
-                            ),
-                            "date": datetime.now().strftime("%d%m%Y"),
-                        }
+                        refreshed_run = await Run.get(run_id)
+                        report_date_ddmmyyyy = _to_ddmmyyyy(
+                            (refreshed_run.report_date if refreshed_run else None)
+                            or execution_params.get("holdings_date")
+                            or execution_params.get("report_date")
+                        )
+                        history_date_ddmmyyyy = _to_ddmmyyyy(
+                            (refreshed_run.history_date if refreshed_run else None)
+                            or execution_params.get("history_date")
+                        )
+                        default_date_ddmmyyyy = report_date_ddmmyyyy or history_date_ddmmyyyy or datetime.now().strftime("%d%m%Y")
 
                         files_metadata = []
                         for idx, original_path in enumerate(original_paths, start=1):
                             suffix = str(idx) if len(original_paths) > 1 else ""
+                            current_name = os.path.basename(original_path)
+                            if _is_history_file(current_name):
+                                selected_date = history_date_ddmmyyyy or default_date_ddmmyyyy
+                            else:
+                                selected_date = report_date_ddmmyyyy or default_date_ddmmyyyy
 
                             renamed_original = (
-                                FileManager.rename_file(original_path, metadata, suffix=suffix)
+                                FileManager.append_date_suffix(
+                                    original_path,
+                                    selected_date,
+                                    suffix=suffix,
+                                )
                                 or original_path
                             )
 
@@ -419,10 +464,12 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             # -------------------------------------------------------------------------
             # Post-Processing (Selenium Released)
             # -------------------------------------------------------------------------
-            if result_payload is not None and job and job.credential_id:
-                credential = await Credential.get(job.credential_id)
+            if result_payload is not None and job:
+                should_process = bool(job.enable_processing and (job.processing_script or "").strip())
+                if job.enable_processing and not should_process:
+                    await log("ℹ️ Processing enabled on job, but no script configured yet")
 
-                if credential and credential.enable_processing:
+                if should_process:
                     from core.services.file_processor import FileProcessorService
 
                     await log("🔄 Processing files (Selenium released)...")
@@ -444,7 +491,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                         await log(f"⚠️ File processing error: {proc_error}")
                         # Do not fail the run if processing fails, as scraping was successful
                 else:
-                    await log("ℹ️ File processing disabled for this credential")
+                    await log("ℹ️ File processing disabled for this job")
 
             return result_payload
                 

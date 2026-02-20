@@ -57,6 +57,10 @@ class DummyJob:
         self.credential_id = credential_id
         self.last_selected_sheet = last_selected_sheet
         self.last_selected_filename = last_selected_filename
+        self.last_update = None
+
+    async def update(self, payload):
+        self.last_update = payload
 
 
 def _client() -> TestClient:
@@ -72,14 +76,13 @@ def _always_acquire_lock(monkeypatch):
     monkeypatch.setattr(downloads.FileProcessorService, "_acquire_processing_lock", _ok, raising=False)
 
 
-def test_select_file_non_excel_triggers_processing(monkeypatch):
+def test_select_file_non_excel_saves_selection_only(monkeypatch):
     run = DummyRun(
         run_id="run-1",
         job_id="job-1",
         files=[{"file_type": "original", "filename": "positions.csv", "path": "run-1/original/positions.csv"}],
     )
     job = DummyJob(credential_id="cred-1")
-    called = {}
 
     async def fake_run_get(run_id):
         assert run_id == "run-1"
@@ -89,21 +92,15 @@ def test_select_file_non_excel_triggers_processing(monkeypatch):
         assert job_id == "job-1"
         return job
 
-    async def fake_process_with_selection(run_id, filename, selected_sheet=None):
-        called["run_id"] = run_id
-        called["filename"] = filename
-        called["selected_sheet"] = selected_sheet
-        return "processed"
-
     monkeypatch.setattr(downloads.Run, "get", fake_run_get, raising=False)
     monkeypatch.setattr(downloads.Job, "get", fake_job_get, raising=False)
-    monkeypatch.setattr(downloads.FileProcessorService, "process_with_user_selection", fake_process_with_selection)
 
     client = _client()
     res = client.post("/downloads/run-1/processing/select-file", json={"filename": "positions.csv"})
     assert res.status_code == 200
-    assert res.json()["status"] == "processed"
-    assert called == {"run_id": "run-1", "filename": "positions.csv", "selected_sheet": None}
+    assert res.json()["status"] == "pending_reprocess"
+    assert run.last_update["$set"]["processing_status"] == "pending_reprocess"
+    assert run.last_update["$set"]["selected_filename"] == "positions.csv"
 
 
 def test_select_file_excel_goes_pending_sheet_when_multiple_sheets(monkeypatch):
@@ -142,25 +139,23 @@ def test_select_file_excel_goes_pending_sheet_when_multiple_sheets(monkeypatch):
     assert run.last_update["$set"]["selected_filename"] == "positions.xlsx"
 
 
-def test_select_sheet_endpoint_triggers_processing(monkeypatch):
+def test_select_sheet_endpoint_saves_selection_only(monkeypatch):
     run = DummyRun(
         run_id="run-3",
         job_id="job-3",
         files=[{"file_type": "original", "filename": "positions.xlsx", "path": "run-3/original/positions.xlsx"}],
     )
-    called = {}
+
+    job = DummyJob(credential_id="cred-3")
 
     async def fake_run_get(run_id):
         return run
 
-    async def fake_process_with_selection(run_id, filename, selected_sheet=None):
-        called["run_id"] = run_id
-        called["filename"] = filename
-        called["selected_sheet"] = selected_sheet
-        return "processed"
+    async def fake_job_get(job_id):
+        return job
 
     monkeypatch.setattr(downloads.Run, "get", fake_run_get, raising=False)
-    monkeypatch.setattr(downloads.FileProcessorService, "process_with_user_selection", fake_process_with_selection)
+    monkeypatch.setattr(downloads.Job, "get", fake_job_get, raising=False)
 
     client = _client()
     res = client.post(
@@ -168,8 +163,9 @@ def test_select_sheet_endpoint_triggers_processing(monkeypatch):
         json={"filename": "positions.xlsx", "selected_sheet": "SheetA"},
     )
     assert res.status_code == 200
-    assert res.json()["status"] == "processed"
-    assert called == {"run_id": "run-3", "filename": "positions.xlsx", "selected_sheet": "SheetA"}
+    assert res.json()["status"] == "pending_reprocess"
+    assert run.last_update["$set"]["processing_status"] == "pending_reprocess"
+    assert run.last_update["$set"]["selected_sheet"] == "SheetA"
 
 
 def test_reprocess_pending_file_selection_when_ambiguous(monkeypatch):
@@ -211,7 +207,6 @@ def test_integration_pending_to_select_sheet_to_processed(monkeypatch):
         selected_filename=None,
     )
     job = DummyJob(credential_id="cred-5", last_selected_sheet=None)
-    state = {"phase": "pending"}
 
     async def fake_run_get(run_id):
         return run
@@ -222,17 +217,9 @@ def test_integration_pending_to_select_sheet_to_processed(monkeypatch):
     async def fake_get_excel_options(run_id, filename=None):
         return ["SheetA", "SheetB"]
 
-    async def fake_process_with_selection(run_id, filename, selected_sheet=None):
-        if selected_sheet is None:
-            state["phase"] = "pending_sheet_selection"
-            return "pending_sheet_selection"
-        state["phase"] = "processed"
-        return "processed"
-
     monkeypatch.setattr(downloads.Run, "get", fake_run_get, raising=False)
     monkeypatch.setattr(downloads.Job, "get", fake_job_get, raising=False)
     monkeypatch.setattr(downloads, "get_excel_options", fake_get_excel_options)
-    monkeypatch.setattr(downloads.FileProcessorService, "process_with_user_selection", fake_process_with_selection)
 
     client = _client()
     options = client.get("/downloads/run-5/processing/options")
@@ -250,5 +237,60 @@ def test_integration_pending_to_select_sheet_to_processed(monkeypatch):
         json={"filename": "positions.xlsx", "selected_sheet": "SheetA"},
     )
     assert select_sheet.status_code == 200
-    assert select_sheet.json()["status"] == "processed"
-    assert state["phase"] == "processed"
+    assert select_sheet.json()["status"] == "pending_reprocess"
+
+
+def test_reprocess_from_processed_uses_script_snapshot(monkeypatch):
+    run = DummyRun(
+        run_id="run-6",
+        job_id="job-6",
+        files=[
+            {"file_type": "original", "filename": "positions.xlsx", "path": "run-6/original/positions.xlsx"},
+            {
+                "file_type": "processed",
+                "filename": "positions_processado-01-01-2026--10-00-00.csv",
+                "path": "run-6/processed/positions_processado-01-01-2026--10-00-00.csv",
+                "processor_script_snapshot": "return df_input",
+                "processor_name": "Proc",
+                "processor_version": 3,
+            },
+        ],
+        selected_filename="positions.xlsx",
+    )
+    job = DummyJob(credential_id="cred-6", last_selected_sheet="Plan1")
+    captured = {}
+
+    async def fake_run_get(run_id):
+        return run
+
+    async def fake_job_get(job_id):
+        return job
+
+    async def fake_process_with_selection(
+        run_id,
+        filename,
+        selected_sheet=None,
+        script_override=None,
+        processor_snapshot_override=None,
+    ):
+        captured["run_id"] = run_id
+        captured["filename"] = filename
+        captured["selected_sheet"] = selected_sheet
+        captured["script_override"] = script_override
+        captured["processor_snapshot_override"] = processor_snapshot_override
+        return "processed"
+
+    monkeypatch.setattr(downloads.Run, "get", fake_run_get, raising=False)
+    monkeypatch.setattr(downloads.Job, "get", fake_job_get, raising=False)
+    monkeypatch.setattr(downloads.FileProcessorService, "process_with_user_selection", fake_process_with_selection)
+
+    client = _client()
+    res = client.post(
+        "/downloads/run-6/processing/reprocess-from-processed",
+        json={"processed_filename": "positions_processado-01-01-2026--10-00-00.csv"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "processed"
+    assert captured["script_override"] == "return df_input"
+    assert captured["filename"] == "positions.xlsx"
+    assert captured["processor_snapshot_override"]["processor_source"] == "snapshot"

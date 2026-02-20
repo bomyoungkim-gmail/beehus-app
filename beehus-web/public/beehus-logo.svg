@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 160" role="img" aria-label="Beehus logo">
+  <defs>
+    <clipPath id="hex-top-left">
+      <polygon points="50,52 67,22 101,22 118,52 101,82 67,82" />
+    </clipPath>
+  </defs>
+
+  <polygon points="50,52 67,22 101,22 118,52 101,82 67,82" fill="#f2f2f2" stroke="#2f2b28" stroke-width="4" stroke-linejoin="round" />
+  <polygon points="106,52 123,22 157,22 174,52 157,82 123,82" fill="#f2f2f2" stroke="#2f2b28" stroke-width="4" stroke-linejoin="round" />
+  <polygon points="22,100 39,70 73,70 90,100 73,130 39,130" fill="#f2f2f2" stroke="#2f2b28" stroke-width="4" stroke-linejoin="round" />
+
+  <polygon points="50,52 67,22 101,22 84,52" fill="#d88511" clip-path="url(#hex-top-left)" />
+</svg>

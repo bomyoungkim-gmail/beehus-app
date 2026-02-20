@@ -41,9 +41,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* SIDEBAR */}
       <aside className={`glass border-r border-dark-border flex flex-col z-20 transition-all duration-300 ${isCollapsed ? 'w-20' : 'w-64'}`}>
         <div className="p-6 flex items-center space-x-3 border-b border-dark-border/50 relative">
-          <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center shadow-lg shadow-brand-500/20 shrink-0">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-          </div>
+          <img
+            src="/beehus-logo.svg"
+            alt="Beehus logo"
+            className="w-8 h-8 rounded-md bg-white/90 p-0.5 shadow-lg shadow-brand-500/20 shrink-0"
+          />
           {!isCollapsed && <span className="font-bold text-lg tracking-tight whitespace-nowrap overflow-hidden transition-opacity duration-300">Beehus</span>}
           
           <button 
@@ -63,10 +65,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
             {!isCollapsed && <span>Workspaces</span>}
           </Link>
+          <Link to="/credentials" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/credentials')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Credential Vault" : ""}>
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+            {!isCollapsed && <span>Credentials</span>}
+          </Link>
           <Link to="/jobs" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/jobs')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Scrape Jobs" : ""}>
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             {!isCollapsed && <span>Scrape Jobs</span>}
           </Link>
+          <div className={`my-2 border-t border-dark-border/70 ${isCollapsed ? 'mx-1' : 'mx-2'}`} />
             <Link to="/runs" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/runs')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Execution History" : ""}>
                 <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 {!isCollapsed && <span>Runs</span>}
@@ -75,10 +82,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             {!isCollapsed && <span>Downloads</span>}
           </Link>
-          <Link to="/credentials" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/credentials')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Credential Vault" : ""}>
-            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
-            {!isCollapsed && <span>Credentials</span>}
-          </Link>
+          <div className={`my-2 border-t border-dark-border/70 ${isCollapsed ? 'mx-1' : 'mx-2'}`} />
           {isAdmin && (
             <Link to="/users" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/users')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Users" : ""}>
               <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a4 4 0 00-5-3.87M7 20H2v-2a4 4 0 015-3.87m10-3.13a4 4 0 11-8 0 4 4 0 018 0zM9 7a4 4 0 108 0 4 4 0 00-8 0z"></path></svg>

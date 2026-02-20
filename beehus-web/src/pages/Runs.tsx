@@ -209,6 +209,7 @@ export default function Runs() {
             not_required: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
             processing: 'bg-brand-500/20 text-brand-300 border-brand-500/30',
             processed: 'bg-green-500/20 text-green-300 border-green-500/30',
+            pending_reprocess: 'bg-cyan-500/20 text-cyan-200 border-cyan-500/30',
             pending_file_selection: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
             pending_sheet_selection: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
             failed: 'bg-red-500/20 text-red-300 border-red-500/30',
@@ -223,7 +224,11 @@ export default function Runs() {
                 `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/downloads/${run.run_id}/processing/options`,
             );
             setFileOptions(res.data);
-            setSelectedFile(res.data[0]?.filename || '');
+            const preferred =
+                run.selected_filename && res.data.some((opt) => opt.filename === run.selected_filename)
+                    ? run.selected_filename
+                    : res.data[0]?.filename || '';
+            setSelectedFile(preferred);
             setFileModalRun(run);
         } catch (error) {
             console.error('Failed to load processing options:', error);
@@ -234,7 +239,7 @@ export default function Runs() {
     const openSheetSelection = async (run: Run, filename?: string) => {
         const targetFile = filename || run.selected_filename;
         if (!targetFile) {
-            showToast('No selected file found for sheet selection', 'error');
+            await openFileSelection(run);
             return;
         }
         try {
@@ -265,7 +270,7 @@ export default function Runs() {
             if (status === 'pending_sheet_selection') {
                 await openSheetSelection(fileModalRun, selectedFile);
             } else {
-                showToast('File selection saved', 'success');
+                showToast('File selection saved. Click Reprocess to execute.', 'success');
             }
             await fetchRuns();
         } catch (error) {
@@ -285,7 +290,7 @@ export default function Runs() {
                 { filename: selectedFile, selected_sheet: selectedSheet },
             );
             setSheetModalRun(null);
-            showToast('Processing started', 'success');
+            showToast('Sheet selection saved. Click Reprocess to execute.', 'success');
             await fetchRuns();
         } catch (error) {
             console.error('Failed to select sheet:', error);
@@ -448,23 +453,29 @@ export default function Runs() {
                                                         {stoppingRunId === run.run_id ? 'Stopping...' : 'Stop'}
                                                     </button>
                                                 )}
-                                                {run.processing_status === 'pending_file_selection' && (
+                                                {run.processing_status !== 'not_required' && (
                                                     <button
                                                         onClick={() => openFileSelection(run)}
                                                         className="text-yellow-300 hover:text-yellow-200 font-medium"
                                                     >
-                                                        Select File
+                                                        {run.selected_filename ? 'Change File' : 'Select File'}
                                                     </button>
                                                 )}
-                                                {run.processing_status === 'pending_sheet_selection' && (
+                                                {run.processing_status !== 'not_required' &&
+                                                    run.selected_filename &&
+                                                    /\.xls(x|m)?$/i.test(run.selected_filename) && (
                                                     <button
                                                         onClick={() => openSheetSelection(run)}
                                                         className="text-yellow-300 hover:text-yellow-200 font-medium"
                                                     >
-                                                        Select Sheet
+                                                        {run.selected_sheet ? 'Change Sheet' : 'Select Sheet'}
                                                     </button>
                                                 )}
-                                                {(run.processing_status === 'processed' || run.processing_status === 'failed' || run.status === 'success') && (
+                                                {run.processing_status !== 'not_required' &&
+                                                    (run.processing_status === 'processed' ||
+                                                        run.processing_status === 'pending_reprocess' ||
+                                                        run.processing_status === 'failed' ||
+                                                        run.status === 'success') && (
                                                     <button
                                                         onClick={() => handleReprocess(run)}
                                                         disabled={processingRunId === run.run_id}

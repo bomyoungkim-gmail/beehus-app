@@ -40,10 +40,16 @@ export default function Login() {
       
       <div className="relative w-full max-w-md p-8 glass rounded-2xl shadow-2xl border border-white/10 mx-4">
         <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-brand-500 rounded-xl mx-auto flex items-center justify-center shadow-lg shadow-brand-500/30 mb-4">
-                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-            </div>
-            <h1 className="text-3xl font-bold text-white tracking-tight">Beehus Console</h1>
+            <img
+                src="/beehus_branco.png"
+                alt="Beehus"
+                className="w-72 max-w-full h-auto mx-auto mb-4"
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = "/beehus-logo.svg";
+                }}
+            />
+            <h1 className="text-3xl font-bold text-white tracking-tight sr-only">Beehus Console</h1>
             <p className="text-slate-400 mt-2">Secure Automation Platform</p>
         </div>
         

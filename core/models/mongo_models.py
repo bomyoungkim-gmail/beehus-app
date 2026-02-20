@@ -86,28 +86,11 @@ class Credential(Document):
     encrypted_password: str
     metadata: dict = {}
     carteira: Optional[str] = None
-    enable_processing: bool = False
     created_at: datetime = Field(default_factory=get_now)
     updated_at: datetime = Field(default_factory=get_now)
 
     class Settings:
         name = "credentials"
-
-
-class FileProcessor(Document):
-    """File processor associated with a credential."""
-    id: str = Field(default_factory=generate_uuid)
-    credential_id: Indexed(str)
-    name: str
-    version: int = 1
-    processor_type: str = "python_script"
-    script_content: str
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=get_now)
-    updated_at: datetime = Field(default_factory=get_now)
-
-    class Settings:
-        name = "file_processors"
 
 
 class Job(Document):
@@ -135,6 +118,8 @@ class Job(Document):
     # Specific date configuration (when date_mode = "specific")
     holdings_date: Optional[str] = None  # Format: YYYY-MM-DD
     history_date: Optional[str] = None    # Format: YYYY-MM-DD
+    enable_processing: bool = False
+    processing_script: Optional[str] = None
     last_selected_filename: Optional[str] = None
     last_selected_sheet: Optional[str] = None
     selection_updated_at: Optional[datetime] = None
@@ -155,6 +140,11 @@ class RunFile(BaseModel):
     is_excel: Optional[bool] = None
     sheet_options: List[str] = Field(default_factory=list)
     is_latest: bool = False
+    processor_id: Optional[str] = None
+    processor_version: Optional[int] = None
+    processor_name: Optional[str] = None
+    processor_script_snapshot: Optional[str] = None
+    processor_source: Optional[str] = None
 
 
 class Run(Document):
@@ -201,5 +191,5 @@ class OtpAudit(Document):
         name = "otp_audit"
 
 MONGO_MODELS = [
-    User, Workspace, Job, Run, InboxIntegration, OtpRule, OtpAudit, Credential, FileProcessor
+    User, Workspace, Job, Run, InboxIntegration, OtpRule, OtpAudit, Credential
 ]

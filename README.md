@@ -12,16 +12,11 @@
 ### Start the Platform
 
 1. Clone the repository
-2. Create your `.env` file (copy example if available or use defaults):
+2. Create your centralized env file:
    ```bash
-   # .env
-   MONGO_DB_NAME=beehus
-   SELENIUM_REMOTE_URL=http://selenium:4444/wd/hub
+   cp config/env/.env.example config/env/.env
    ```
-   ```
-
-   ```
-3. (Optional) For local development features (hot-reload, exposed ports), ensure `docker-compose.override.yml` is present (should be gitignored).
+3. Edit `config/env/.env` with your environment values.
 4. Run with Docker Compose:
    ```bash
    docker compose up --build -d
@@ -94,7 +89,7 @@ Below is a breakdown of each container and its role in the platform:
 
 ### 🔐 Environment Variables
 
-### Frontend (`.env` or Docker env)
+### Frontend (`config/env/.env` or Docker env)
 
 | Variable            | Description                                                | Default                 |
 | :------------------ | :--------------------------------------------------------- | :---------------------- |
@@ -102,7 +97,7 @@ Below is a breakdown of each container and its role in the platform:
 | `VITE_VNC_URL`      | URL of the Selenium VNC Server (accessible from browser)   | `http://localhost:7900` |
 | `VITE_VNC_PASSWORD` | Password for VNC connection (must match `SE_VNC_PASSWORD`) | `secret`                |
 
-### Backend (`.env`)
+### Backend (`config/env/.env`)
 
 | Variable              | Description                                 | Default                       |
 | :-------------------- | :------------------------------------------ | :---------------------------- |
@@ -128,7 +123,9 @@ Access [http://localhost:5173](http://localhost:5173) to:
 - **Monitor Live Executions:** View active and queued runs with real-time status updates.
 - **Manage Jobs/Workspaces:** Create and configure scraping jobs.
 - **Execution History:** View detailed logs of past runs via the "Runs" page.
+- **Processing Selection in Runs:** For ambiguous downloads, choose file and Excel sheet directly in "Runs"; recurring jobs reuse the last selection automatically.
 - **Downloads & Reports:** Access downloaded and processed files via the "Downloads" page.
+  - Reprocessed outputs keep version history and the newest processed file is marked as `Latest`.
 - **Credential Processors:** Configure per-credential file processing scripts with version history.
 - **Collapsible Sidebar:** Toggle the sidebar to maximize screen real estate.
 
@@ -192,6 +189,16 @@ Trigger a scrape via **App Console** Swagger UI ([http://localhost:8000/docs](ht
 
 The run will be queued in RabbitMQ, picked up by `celery-worker`, and executed on `selenium`.
 id **Gmail Refresh Token** and Client credentials.
+
+### Processing Selection Endpoints
+
+Use these endpoints when a run requires manual processing selection:
+
+- `GET /downloads/{run_id}/processing/options`
+- `POST /downloads/{run_id}/processing/select-file`
+- `GET /downloads/{run_id}/processing/excel-options?filename=...`
+- `POST /downloads/{run_id}/processing/select-sheet`
+- `POST /downloads/{run_id}/processing/process` (manual reprocess with versioned output)
 
 ### 4. Configure OTP
 

@@ -72,11 +72,6 @@ class UpdateMeRequest(BaseModel):
     new_password: Optional[str] = None
 
 
-def _handle_permission_error(exc: Exception) -> None:
-    if isinstance(exc, PermissionError):
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-
-
 @router.post("/invite", response_model=InviteResponse)
 async def invite_user(
     payload: InviteRequest,
@@ -90,7 +85,7 @@ async def invite_user(
             role=payload.role,
         )
     except PermissionError as exc:
-        _handle_permission_error(exc)
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -101,7 +96,7 @@ async def list_users(current_user: User = Depends(get_current_user)):
         users = await user_service.list_users(current_user)
         return users
     except PermissionError as exc:
-        _handle_permission_error(exc)
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.patch("/{user_id}", response_model=UserOut)
@@ -113,7 +108,7 @@ async def update_user(
     try:
         return await user_service.update_user(current_user, user_id, payload.dict())
     except PermissionError as exc:
-        _handle_permission_error(exc)
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         status_code = 404 if "not found" in str(exc).lower() else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
@@ -128,7 +123,7 @@ async def deactivate_user(
         await user_service.deactivate_user(current_user, user_id)
         return {"message": "User deactivated"}
     except PermissionError as exc:
-        _handle_permission_error(exc)
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -142,7 +137,7 @@ async def activate_user(
         await user_service.activate_user(current_user, user_id)
         return {"message": "User activated"}
     except PermissionError as exc:
-        _handle_permission_error(exc)
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

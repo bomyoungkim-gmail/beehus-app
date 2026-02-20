@@ -8,6 +8,7 @@ from cryptography.fernet import Fernet
 import os
 import asyncio
 import json
+import logging
 import redis.asyncio as redis
 from typing import List
 from datetime import datetime
@@ -24,8 +25,10 @@ from core.schemas.otp import (
     InboxIntegrationCreate, InboxIntegrationResponse,
     OtpRuleCreate, OtpRuleResponse
 )
-from app.console.schemas import JobCreate, JobResponse, RunResponse
+from app.console.schemas import JobCreate, JobResponse, JobUpdate, RunResponse
 from app.console.websockets import ConnectionManager
+
+logger = logging.getLogger(__name__)
 
 # WebSocket Manager
 manager = ConnectionManager()
@@ -59,17 +62,30 @@ async def redis_listener():
         print(f"Redis listener error: {e}")
 
 # Crypto Helpers
+def _token_fernet() -> Fernet:
+    raw_key = os.getenv("TOKEN_ENC_KEY", "").strip()
+    if not raw_key:
+        raise RuntimeError(
+            "TOKEN_ENC_KEY is not configured. Set a valid Fernet key in environment."
+        )
+    try:
+        return Fernet(raw_key.encode())
+    except Exception as exc:
+        raise RuntimeError(
+            "Invalid TOKEN_ENC_KEY. Generate one with: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        ) from exc
+
+
 def encrypt_token(token: str) -> str:
     """Encrypts a token using Fernet symmetric encryption."""
-    key = os.getenv("TOKEN_ENC_KEY", "someloginsecretkeythatshouldbesecret==").encode()
-    f = Fernet(key)
+    f = _token_fernet()
     return f.encrypt(token.encode()).decode()
 
 
 def decrypt_token(token: str) -> str:
     """Decrypts a token using Fernet symmetric encryption."""
-    key = os.getenv("TOKEN_ENC_KEY", "someloginsecretkeythatshouldbesecret==").encode()
-    f = Fernet(key)
+    f = _token_fernet()
     return f.decrypt(token.encode()).decode()
 
 
@@ -113,12 +129,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.console.routers import auth, credentials, users, downloads, processors
+from app.console.routers import auth, credentials, users, downloads
 app.include_router(auth.router)
 app.include_router(credentials.router)
 app.include_router(users.router)
 app.include_router(downloads.router)
-app.include_router(processors.router)
 
 
 # ============================================================================
@@ -160,6 +175,7 @@ async def delete_workspace(workspace_id: str):
     # Also delete all jobs in this workspace
     jobs = await Job.find(Job.workspace_id == workspace_id).to_list()
     for job in jobs:
+        await Run.find(Run.job_id == str(job.id)).delete()
         await job.delete()
     
     await workspace.delete()
@@ -273,6 +289,26 @@ async def get_job(job_id: str):
     return job
 
 
+@app.patch("/jobs/{job_id}", response_model=JobResponse)
+async def update_job(job_id: str, job_update: JobUpdate):
+    """Update mutable fields for a job."""
+    job = await Job.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job_update.enable_processing is not None:
+        job.enable_processing = job_update.enable_processing
+        if not job.enable_processing:
+            job.processing_script = None
+
+    if job_update.processing_script is not None:
+        script = job_update.processing_script.strip()
+        job.processing_script = script or None
+
+    await job.save()
+    return job
+
+
 @app.delete("/jobs/{job_id}")
 async def delete_job(job_id: str):
     """Delete a job by ID."""
@@ -366,6 +402,10 @@ async def retry_run(job_id: str, run_id: str):
     run.error_summary = None
     run.started_at = None
     run.finished_at = None
+    run.processing_status = "not_required"
+    run.selected_filename = None
+    run.selected_sheet = None
+    run.processing_error = None
     # Ensure connector is set (for old runs that didn't have it)
     if not run.connector and job:
         run.connector = job.connector
@@ -388,7 +428,7 @@ async def retry_run(job_id: str, run_id: str):
     # Re-dispatch to Celery
     task = scrape_task.delay(
         job_id=job.id,
-        run_id=run.id,
+        run_id=str(run.id),
         workspace_id=job.workspace_id,
         connector_name=job.connector,
         params=execution_params
@@ -560,6 +600,10 @@ async def get_recent_runs(limit: int = 10):
             "job_name": job_name or connector_name,
             "connector": connector_name,
             "status": run.status,
+            "processing_status": run.processing_status or "not_required",
+            "selected_filename": run.selected_filename,
+            "selected_sheet": run.selected_sheet,
+            "processing_error": run.processing_error,
             "report_date": run.report_date,
             "history_date": run.history_date,
             "node": "selenium-node-1",  # TODO: Add node tracking

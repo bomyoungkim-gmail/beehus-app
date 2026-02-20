@@ -40,7 +40,9 @@ class SeletorItauOnshore:
     DATEPICKER_TRIGGER = (
         By.CSS_SELECTOR,
         "input[placeholder*='DD/MM'], input[placeholder*='dd/mm'], "
-        "input[idsmask*='date'], input[inputmode='none']"
+        "input[idsmask*='date'], input[inputmode='none'], "
+        "ids-datepicker input, ids-datepicker button, "
+        "button[aria-label*='calend' i], button[aria-haspopup='dialog'][aria-label*='data' i]"
     )
     DATEPICKER_OVERLAY = (By.CSS_SELECTOR, "section.ids-datepicker, .ids-datepicker")
     DATEPICKER_DAY_BUTTON = "//button[@role='checkbox' and contains(@aria-label, '{dia} {mes} {ano}')]"

@@ -141,15 +141,45 @@ class SeleniumHelpers:
         return self.driver.execute_script(script, selector)
 
 
-    def _find_element_maybe_shadow(self, by, value):
+    def _find_element_maybe_shadow(self, by, value, timeout: Optional[int] = None):
+        wait = self.wait if timeout is None else WebDriverWait(self.driver, timeout)
         if by == By.CSS_SELECTOR:
             try:
-                el = self.wait.until(lambda d: self._query_shadow_dom_css(value))
+                el = wait.until(lambda d: self._query_shadow_dom_css(value))
                 if el:
                     return el
             except Exception:
                 pass
-        return self.wait.until(EC.presence_of_element_located((by, value)))
+        return wait.until(EC.presence_of_element_located((by, value)))
+
+    def _resolve_datepicker_trigger(self, trigger_locator):
+        by, value = trigger_locator
+        fallback_locators = [
+            (by, value),
+            (
+                By.CSS_SELECTOR,
+                "input[inputmode='none'], input[idsmask*='date'], input[placeholder*='DD/MM'], "
+                "input[placeholder*='dd/mm'], ids-datepicker input, "
+                "button[aria-label*='calend' i], button[aria-haspopup='dialog'][aria-label*='data' i], "
+                "ids-datepicker button"
+            ),
+            (
+                By.XPATH,
+                "//ids-datepicker//*[self::input or self::button]"
+            ),
+        ]
+
+        for locator in fallback_locators:
+            try:
+                el = self._find_element_maybe_shadow(*locator, timeout=8)
+                if el and el.is_displayed() and el.is_enabled():
+                    return el
+            except Exception:
+                continue
+
+        raise RuntimeError(
+            f"Nao foi possivel localizar o trigger do datepicker usando locator principal: {trigger_locator}"
+        )
 
 
     def _set_input_value_js(self, el, date_str: str) -> bool:
@@ -281,7 +311,7 @@ class SeleniumHelpers:
         
         # ESTRATÉGIA 1: Input direto (mais rápido)
         try:
-            date_input = self._find_element_maybe_shadow(*trigger_locator)
+            date_input = self._resolve_datepicker_trigger(trigger_locator)
             if date_input and date_input.is_displayed() and date_input.is_enabled():
                 if self._set_input_value_js(date_input, date_str):
                     return  # Sucesso!
@@ -314,7 +344,7 @@ class SeleniumHelpers:
         ano = dt.year
         
         try:
-            trigger = self._find_element_maybe_shadow(*trigger_locator)
+            trigger = self._resolve_datepicker_trigger(trigger_locator)
         except Exception as e:
             raise RuntimeError("Nao foi possivel localizar o trigger do datepicker.") from e
         self.wait.until(lambda d: trigger.is_displayed() and trigger.is_enabled())

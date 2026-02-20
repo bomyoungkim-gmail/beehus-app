@@ -17,6 +17,7 @@ import shutil
 import asyncio
 import logging
 from datetime import datetime
+import re
 from core.utils.date_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,40 @@ SELENIUM_MAX_SLOTS = max(
     settings.SELENIUM_MAX_SLOTS,
     settings.SELENIUM_NODE_COUNT * settings.SELENIUM_NODE_MAX_SESSIONS,
 )
+
+
+def _to_ddmmyyyy(value: str | None) -> str | None:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    # 19/02/2026 or 19-02-2026
+    m = re.match(r"^(\d{2})[/-](\d{2})[/-](\d{4})$", s)
+    if m:
+        return f"{m.group(1)}{m.group(2)}{m.group(3)}"
+    # 2026-02-19
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
+    if m:
+        return f"{m.group(3)}{m.group(2)}{m.group(1)}"
+    # 19022026
+    digits = re.sub(r"\D", "", s)
+    if len(digits) == 8:
+        return digits
+    return None
+
+
+def _is_history_file(filename: str) -> bool:
+    name = (filename or "").lower()
+    history_markers = [
+        "extrato",
+        "historico",
+        "historico",
+        "history",
+        "transaction",
+        "moviment",
+    ]
+    return any(marker in name for marker in history_markers)
 
 
 async def _ensure_selenium_slots(redis_client) -> None:
@@ -103,7 +138,7 @@ class DatabaseTask(Task):
         return super().__call__(*args, **kwargs)
 
 
-@celery_app.task(bind=True, max_retries=3, time_limit=1800)
+@celery_app.task(base=DatabaseTask, bind=True, max_retries=3, time_limit=1800)
 def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_name: str, params: dict):
     """
     Main scraping task - executes a connector with Selenium.
@@ -332,6 +367,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 await log("Checking for downloaded files...")
                 try:
                     from core.services.file_manager import FileManager
+                    from core.services.excel_introspection import is_excel_filename, list_sheet_names
 
                     original_paths = FileManager.capture_downloads(
                         run_id,
@@ -344,23 +380,33 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     )
 
                     if original_paths:
-                        metadata = {
-                            "bank": connector_name.replace("conn_", "").replace("_", " ").title(),
-                            "account": (
-                                params_with_context.get("conta")
-                                or params_with_context.get("conta_corrente")
-                                or params_with_context.get("account")
-                                or "0000"
-                            ),
-                            "date": datetime.now().strftime("%d%m%Y"),
-                        }
+                        refreshed_run = await Run.get(run_id)
+                        report_date_ddmmyyyy = _to_ddmmyyyy(
+                            (refreshed_run.report_date if refreshed_run else None)
+                            or execution_params.get("holdings_date")
+                            or execution_params.get("report_date")
+                        )
+                        history_date_ddmmyyyy = _to_ddmmyyyy(
+                            (refreshed_run.history_date if refreshed_run else None)
+                            or execution_params.get("history_date")
+                        )
+                        default_date_ddmmyyyy = report_date_ddmmyyyy or history_date_ddmmyyyy or datetime.now().strftime("%d%m%Y")
 
                         files_metadata = []
                         for idx, original_path in enumerate(original_paths, start=1):
                             suffix = str(idx) if len(original_paths) > 1 else ""
+                            current_name = os.path.basename(original_path)
+                            if _is_history_file(current_name):
+                                selected_date = history_date_ddmmyyyy or default_date_ddmmyyyy
+                            else:
+                                selected_date = report_date_ddmmyyyy or default_date_ddmmyyyy
 
                             renamed_original = (
-                                FileManager.rename_file(original_path, metadata, suffix=suffix)
+                                FileManager.append_date_suffix(
+                                    original_path,
+                                    selected_date,
+                                    suffix=suffix,
+                                )
                                 or original_path
                             )
 
@@ -371,6 +417,13 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                                     "path": FileManager.to_artifact_relative(renamed_original),
                                     "size_bytes": FileManager.get_file_size(renamed_original),
                                     "status": "ready",
+                                    "is_excel": is_excel_filename(os.path.basename(renamed_original)),
+                                    "sheet_options": (
+                                        list_sheet_names(renamed_original)
+                                        if is_excel_filename(os.path.basename(renamed_original))
+                                        else []
+                                    ),
+                                    "is_latest": False,
                                 }
                             )
 
@@ -411,49 +464,34 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             # -------------------------------------------------------------------------
             # Post-Processing (Selenium Released)
             # -------------------------------------------------------------------------
-            if result_payload is not None and job and job.credential_id:
-                credential = await Credential.get(job.credential_id)
+            if result_payload is not None and job:
+                should_process = bool(job.enable_processing and (job.processing_script or "").strip())
+                if job.enable_processing and not should_process:
+                    await log("ℹ️ Processing enabled on job, but no script configured yet")
 
-                if credential and credential.enable_processing:
-                    from core.services.file_manager import FileManager
+                if should_process:
                     from core.services.file_processor import FileProcessorService
 
                     await log("🔄 Processing files (Selenium released)...")
                     try:
-                        processed_paths = await FileProcessorService.process_files(
-                            run_id,
-                            job.credential_id,
+                        processing_state = await FileProcessorService.resolve_and_process_post_scrape(
+                            run_id=run_id,
+                            job_id=job.id,
+                            credential_id=job.credential_id,
                         )
-
-                        if processed_paths:
-                            # Re-fetch run to ensure we have latest state
-                            current_run = await Run.get(run_id)
-                            if not current_run:
-                                await log("⚠️ Run not found while appending processed files")
-                                return result_payload
-                            
-                            current_files = current_run.files or []
-
-                            for processed_path in processed_paths:
-                                current_files.append(
-                                    {
-                                        "file_type": "processed",
-                                        "filename": os.path.basename(processed_path),
-                                        "path": FileManager.to_artifact_relative(processed_path),
-                                        "size_bytes": FileManager.get_file_size(processed_path),
-                                        "status": "ready",
-                                    }
-                                )
-
-                            await current_run.update({"$set": {"files": current_files}})
-                            await log(f"✅ Processed {len(processed_paths)} file(s)")
+                        if processing_state == "processed":
+                            await log("✅ Processed files generated successfully")
+                        elif processing_state in {"pending_file_selection", "pending_sheet_selection"}:
+                            await log(f"⏸️ Waiting for user action: {processing_state}")
+                        elif processing_state == "not_required":
+                            await log("ℹ️ No original files available for processing")
                         else:
-                            await log("ℹ️ No processor configured or active for this credential")
+                            await log(f"⚠️ File processing ended with state: {processing_state}")
                     except Exception as proc_error:
                         await log(f"⚠️ File processing error: {proc_error}")
                         # Do not fail the run if processing fails, as scraping was successful
                 else:
-                    await log("ℹ️ File processing disabled for this credential")
+                    await log("ℹ️ File processing disabled for this job")
 
             return result_payload
                 
@@ -462,14 +500,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             await repo.save_run_status(run_id, "failed", str(e))
             raise
     
-    # Use existing event loop or create new one if needed
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(_async_scrape())
+    return asyncio.run(_async_scrape())
 
 
 @celery_app.task(base=DatabaseTask, bind=True)
@@ -596,6 +627,19 @@ def scheduled_job_runner(self, job_id: str):
         await run.save()
         
         logger.info(f"📅 Scheduled job triggered: {job_id}, run: {run.id}")
+
+        execution_params = (job.params or {}).copy()
+        execution_params.update(
+            {
+                "export_holdings": job.export_holdings,
+                "export_history": job.export_history,
+                "date_mode": job.date_mode,
+                "holdings_lag_days": job.holdings_lag_days,
+                "history_lag_days": job.history_lag_days,
+                "holdings_date": job.holdings_date,
+                "history_date": job.history_date,
+            }
+        )
         
         # Dispatch to regular scrape task
         scrape_task.delay(
@@ -603,7 +647,7 @@ def scheduled_job_runner(self, job_id: str):
             run_id=str(run.id),
             workspace_id=job.workspace_id,
             connector_name=job.connector,
-            params=job.params
+            params=execution_params
         )
         
         return {"job_id": job_id, "run_id": str(run.id)}

@@ -1,15 +1,9 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import Editor from "react-simple-code-editor";
-import { highlight, languages } from "prismjs";
-import "prismjs/components/prism-python";
-import "prismjs/themes/prism-tomorrow.css";
 import Layout from "../components/Layout";
 import ConfirmModal from "../components/ui/ConfirmModal";
 import { useToast } from "../context/ToastContext";
-import { processorsApi } from "../api/processors";
-import type { Processor } from "../api/processors";
-import { formatDate, formatDateTime } from "../utils/datetime";
+import { formatDate } from "../utils/datetime";
 
 interface Credential {
   id: string;
@@ -18,7 +12,6 @@ interface Credential {
   username: string;
   metadata: Record<string, any>;
   carteira?: string | null;
-  enable_processing?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -47,13 +40,6 @@ export default function Credentials() {
 
   const { showToast } = useToast();
 
-  const [processorScript, setProcessorScript] = useState("");
-  const [processorName, setProcessorName] = useState("");
-  const [processors, setProcessors] = useState<Processor[]>([]);
-  const [showProcessorHistory, setShowProcessorHistory] = useState(false);
-  const [loadingProcessors, setLoadingProcessors] = useState(false);
-  const [showScriptEditorModal, setShowScriptEditorModal] = useState(false);
-
   const [formData, setFormData] = useState<{
     workspace_id: string;
     label: string;
@@ -61,7 +47,6 @@ export default function Credentials() {
     password: string;
     metadata: Record<string, any>;
     carteira: string;
-    enable_processing: boolean;
   }>({
     workspace_id: "",
     label: "",
@@ -69,7 +54,6 @@ export default function Credentials() {
     password: "",
     metadata: {},
     carteira: "",
-    enable_processing: false,
   });
 
   const fetchCredentials = async () => {
@@ -96,78 +80,10 @@ export default function Credentials() {
     }
   };
 
-  const resetProcessorState = () => {
-    setProcessorScript("");
-    setProcessorName("");
-    setProcessors([]);
-    setShowProcessorHistory(false);
-    setLoadingProcessors(false);
-    setShowScriptEditorModal(false);
-  };
-
-  const loadProcessors = async (credentialId: string) => {
-    setLoadingProcessors(true);
-    try {
-      const procs = await processorsApi.listByCredential(credentialId);
-      setProcessors(procs);
-
-      const active = procs.find((proc) => proc.is_active);
-      if (active) {
-        const full = await processorsApi.get(active.id);
-        setProcessorScript(full.script_content || "");
-        setProcessorName(full.name);
-      } else {
-        setProcessorScript("");
-        setProcessorName("");
-      }
-    } catch (error) {
-      console.error("Failed to load processors:", error);
-    } finally {
-      setLoadingProcessors(false);
-    }
-  };
-
-  const saveProcessor = async () => {
-    if (!editingId) {
-      return;
-    }
-
-    try {
-      if (processors.length === 0) {
-        await processorsApi.create({
-          credential_id: editingId,
-          name: processorName || `${formData.label || "Credential"} Processor`,
-          script_content: processorScript,
-        });
-      } else {
-        const active = processors.find((proc) => proc.is_active);
-        if (active) {
-          await processorsApi.update(active.id, {
-            name: processorName,
-            script_content: processorScript,
-          });
-        }
-      }
-
-      showToast("Processor saved successfully", "success");
-      await loadProcessors(editingId);
-    } catch (error) {
-      showToast("Failed to save processor", "error");
-    }
-  };
-
   useEffect(() => {
     fetchCredentials();
     fetchWorkspaces();
   }, []);
-
-  useEffect(() => {
-    if (editingId) {
-      loadProcessors(editingId);
-    } else {
-      resetProcessorState();
-    }
-  }, [editingId]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,10 +114,8 @@ export default function Credentials() {
         password: "",
         metadata: {},
         carteira: "",
-        enable_processing: false,
       });
       setEditingId(null);
-      resetProcessorState();
       fetchCredentials();
     } catch (error) {
       showToast(
@@ -222,7 +136,6 @@ export default function Credentials() {
       password: "", // Don't populate password for security
       metadata: credential.metadata,
       carteira: credential.carteira || "",
-      enable_processing: credential.enable_processing || false,
     });
     setEditingId(credential.id);
     setShowModal(true);
@@ -272,9 +185,7 @@ export default function Credentials() {
                 password: "",
                 metadata: {},
                 carteira: "",
-                enable_processing: false,
               });
-              resetProcessorState();
               setShowModal(true);
             }}
             className="bg-brand-600 hover:bg-brand-500 text-white px-6 py-2.5 rounded-lg font-medium shadow-lg shadow-brand-500/20 transition-all flex items-center space-x-2"
@@ -556,7 +467,7 @@ export default function Credentials() {
 
                 <div className="border-t border-white/10 pt-4">
                   <h4 className="text-sm font-semibold text-slate-300 mb-3">
-                    Processing Settings
+                    Additional Settings
                   </h4>
 
                   <div>
@@ -573,94 +484,10 @@ export default function Credentials() {
                       placeholder="e.g., Portfolio ABC"
                     />
                     <p className="text-xs text-slate-500 mt-1">
-                      Available to processors as the{" "}
+                      Available to jobs processing as the{" "}
                       <span className="font-mono">carteira</span> variable
                     </p>
                   </div>
-
-                  <div className="mt-4">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="enable-processing"
-                        checked={formData.enable_processing}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            enable_processing: e.target.checked,
-                          })
-                        }
-                        className="w-4 h-4"
-                      />
-                      <label
-                        htmlFor="enable-processing"
-                        className="text-sm font-medium cursor-pointer text-slate-300"
-                      >
-                        Process files automatically after download
-                      </label>
-                    </div>
-
-                    {formData.enable_processing ? (
-                      <div className="mt-2 p-3 border rounded bg-blue-50/10 border-blue-400/20">
-                        <p className="text-sm text-blue-200">
-                          Files will be processed automatically using the script
-                          below
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="mt-2 p-3 border rounded bg-white/5 border-white/10">
-                        <p className="text-sm text-slate-400">
-                          Only original files will be stored (no processing)
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {formData.enable_processing && (
-                    <div className="mt-6 border-t border-white/10 pt-6">
-                      {!editingId ? (
-                        <div className="p-3 border rounded bg-white/5 border-white/10">
-                          <p className="text-sm text-slate-400">
-                            Save the credential first to create a processor
-                            script.
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          <div className="p-4 border rounded bg-white/5 border-white/10 space-y-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-sm font-semibold text-slate-200">
-                                  Python Processor Script
-                                </p>
-                                <p className="text-xs text-slate-500 mt-1">
-                                  Edite o script em um modal dedicado para melhor
-                                  visualizacao.
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setShowScriptEditorModal(true)}
-                                className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-500 text-sm font-medium"
-                              >
-                                Open Script Editor
-                              </button>
-                            </div>
-                            <p className="text-xs text-slate-400 font-mono break-all">
-                              {processorName
-                                ? `Processor: ${processorName}`
-                                : "No processor name defined yet"}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {processorScript.trim()
-                                ? "Script loaded and ready to save."
-                                : "No script content yet."}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex space-x-3 pt-4 border-t border-white/10">
@@ -676,9 +503,7 @@ export default function Credentials() {
                         password: "",
                         metadata: {},
                         carteira: "",
-                        enable_processing: false,
                       });
-                      resetProcessorState();
                     }}
                     className="flex-1 bg-white/5 hover:bg-white/10 text-white px-6 py-2.5 rounded-lg font-medium transition-all"
                   >
@@ -703,161 +528,6 @@ export default function Credentials() {
           </div>
         )}
       </div>
-
-      {showModal && formData.enable_processing && editingId && showScriptEditorModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="glass p-6 rounded-xl border border-white/10 w-full max-w-5xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
-                <h4 className="text-xl font-bold text-white">
-                  Python Script Editor
-                </h4>
-                <p className="text-sm text-slate-400">
-                  Edit and version your processor script for this credential.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowScriptEditorModal(false)}
-                className="px-3 py-2 bg-white/10 text-white rounded hover:bg-white/20 text-sm"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">
-                  Processor Name
-                </label>
-                <input
-                  type="text"
-                  className="w-full bg-dark-surface border border-white/10 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand-500"
-                  placeholder="e.g., Itau Onshore Position Extractor"
-                  value={processorName}
-                  onChange={(e) => setProcessorName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-2">
-                  Python Script
-                  <span className="ml-2 text-xs text-slate-500">
-                    (runs on the server after each download)
-                  </span>
-                </label>
-
-                <div className="border rounded overflow-hidden border-white/10">
-                  <Editor
-                    value={processorScript}
-                    onValueChange={setProcessorScript}
-                    highlight={(code) =>
-                      highlight(code, languages.python, "python")
-                    }
-                    padding={12}
-                    placeholder={`# Python script to process files
-# Available variables:
-# - original_dir: path to original files
-# - processed_dir: path to save processed files
-# - carteira: credential carteira field
-# - metadata: credential metadata dict
-# - run_id: current run ID
-# - credential_label: credential label
-
-from pathlib import Path
-
-for file_path in Path(original_dir).glob('*.xlsx'):
-    print(f'Found: {file_path.name}')
-`}
-                    style={{
-                      fontFamily: '"Fira Code", "Fira Mono", monospace',
-                      fontSize: 14,
-                      backgroundColor: "#1e1e1e",
-                      minHeight: "380px",
-                      maxHeight: "65vh",
-                      overflow: "auto",
-                    }}
-                    className="font-mono text-sm"
-                  />
-                </div>
-
-                <p className="text-xs text-slate-500 mt-2">
-                  Tip: Use pandas or openpyxl if available on the server.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={saveProcessor}
-                  className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-500 disabled:opacity-50"
-                  disabled={!processorScript.trim() || loadingProcessors}
-                >
-                  Save Processor
-                </button>
-
-                {processors.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowProcessorHistory(!showProcessorHistory)}
-                    className="px-4 py-2 bg-white/10 text-white rounded hover:bg-white/20"
-                  >
-                    {showProcessorHistory ? "Hide" : "Show"} History (
-                    {processors.length})
-                  </button>
-                )}
-              </div>
-
-              {showProcessorHistory && (
-                <div className="border rounded p-4 bg-white/5 border-white/10">
-                  <h5 className="font-semibold mb-3 text-white">
-                    Processor History
-                  </h5>
-                  <div className="space-y-2">
-                    {processors.map((proc) => (
-                      <div
-                        key={proc.id}
-                        className="flex items-center justify-between p-3 bg-dark-surface rounded border border-white/10"
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-white">
-                              {proc.name}
-                            </span>
-                            <span className="text-xs text-slate-400">
-                              v{proc.version}
-                            </span>
-                            {proc.is_active && (
-                              <span className="px-2 py-1 bg-green-500/20 text-green-200 text-xs rounded font-medium">
-                                Active
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-1">
-                            Created: {formatDateTime(proc.created_at)}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const full = await processorsApi.get(proc.id);
-                            setProcessorScript(full.script_content || "");
-                            setProcessorName(full.name);
-                            showToast(`Loaded version ${proc.version}`, "info");
-                          }}
-                          className="ml-4 px-3 py-1 text-brand-400 hover:bg-brand-500/10 rounded text-sm"
-                        >
-                          Load
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Delete Modal */}
       <ConfirmModal

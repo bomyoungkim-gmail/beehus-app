@@ -6,6 +6,7 @@ __pycache__/
 venv/
 ENV/
 .env/
+config/env/.env
 
 # Node
 node_modules/
@@ -36,3 +37,6 @@ artifacts/
 .env.clean
 docker-compose.yml.backup
 docker-compose.yml.dev
+
+# Reservado
+plano/

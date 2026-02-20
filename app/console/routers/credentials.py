@@ -4,10 +4,11 @@ Credentials Router - API endpoints for managing secure credentials.
 
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.models.mongo_models import Credential
-from core.security import encrypt_value, decrypt_value
+from core.security import encrypt_value
+from core.utils.date_utils import get_now
 
 router = APIRouter(prefix="/credentials", tags=["credentials"])
 
@@ -18,9 +19,8 @@ class CredentialCreate(BaseModel):
     label: str
     username: str
     password: str
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
     carteira: Optional[str] = None
-    enable_processing: bool = False
 
 
 class CredentialUpdate(BaseModel):
@@ -29,7 +29,6 @@ class CredentialUpdate(BaseModel):
     password: Optional[str] = None
     metadata: Optional[dict] = None
     carteira: Optional[str] = None
-    enable_processing: Optional[bool] = None
 
 
 class CredentialResponse(BaseModel):
@@ -39,7 +38,6 @@ class CredentialResponse(BaseModel):
     username: str
     metadata: dict
     carteira: Optional[str] = None
-    enable_processing: bool = False
     created_at: str
     updated_at: str
 
@@ -60,7 +58,6 @@ async def create_credential(cred_in: CredentialCreate):
         encrypted_password=encrypted_password,
         metadata=cred_in.metadata,
         carteira=cred_in.carteira,
-        enable_processing=cred_in.enable_processing,
     )
     await credential.save()
     
@@ -71,7 +68,6 @@ async def create_credential(cred_in: CredentialCreate):
         username=credential.username,
         metadata=credential.metadata,
         carteira=credential.carteira,
-        enable_processing=credential.enable_processing,
         created_at=credential.created_at.isoformat(),
         updated_at=credential.updated_at.isoformat()
     )
@@ -95,7 +91,6 @@ async def list_credentials(workspace_id: Optional[str] = None):
             username=cred.username,
             metadata=cred.metadata,
             carteira=cred.carteira,
-            enable_processing=cred.enable_processing,
             created_at=cred.created_at.isoformat(),
             updated_at=cred.updated_at.isoformat()
         )
@@ -117,7 +112,6 @@ async def get_credential(credential_id: str):
         username=credential.username,
         metadata=credential.metadata,
         carteira=credential.carteira,
-        enable_processing=credential.enable_processing,
         created_at=credential.created_at.isoformat(),
         updated_at=credential.updated_at.isoformat()
     )
@@ -126,8 +120,6 @@ async def get_credential(credential_id: str):
 @router.put("/{credential_id}", response_model=CredentialResponse)
 async def update_credential(credential_id: str, cred_update: CredentialUpdate):
     """Update an existing credential."""
-    from datetime import datetime
-    
     credential = await Credential.get(credential_id)
     if not credential:
         raise HTTPException(status_code=404, detail="Credential not found")
@@ -143,10 +135,8 @@ async def update_credential(credential_id: str, cred_update: CredentialUpdate):
         credential.metadata = cred_update.metadata
     if cred_update.carteira is not None:
         credential.carteira = cred_update.carteira
-    if cred_update.enable_processing is not None:
-        credential.enable_processing = cred_update.enable_processing
     
-    credential.updated_at = datetime.utcnow()
+    credential.updated_at = get_now()
     await credential.save()
     
     return CredentialResponse(
@@ -156,7 +146,6 @@ async def update_credential(credential_id: str, cred_update: CredentialUpdate):
         username=credential.username,
         metadata=credential.metadata,
         carteira=credential.carteira,
-        enable_processing=credential.enable_processing,
         created_at=credential.created_at.isoformat(),
         updated_at=credential.updated_at.isoformat()
     )

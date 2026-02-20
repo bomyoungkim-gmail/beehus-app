@@ -115,6 +115,22 @@ def _original_files(run: Run) -> List[Dict[str, Any]]:
     return out
 
 
+def _existing_files_only(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
+    for file_meta in files:
+        rel = file_meta.get("path")
+        if not rel:
+            filtered.append(file_meta)
+            continue
+        try:
+            path = _resolve_artifact_path(rel)
+            if path.exists() and path.is_file():
+                filtered.append(file_meta)
+        except Exception:
+            continue
+    return filtered
+
+
 def _to_iso8601_utc(value: datetime) -> str:
     """
     Return a timezone-aware ISO-8601 UTC string.
@@ -187,6 +203,10 @@ async def list_downloads(
         items = []
         for run in runs:
             normalized_files = [_file_meta_to_dict(f) for f in (run.files or [])]
+            existing_files = _existing_files_only(normalized_files)
+            if len(existing_files) != len(normalized_files):
+                await run.update({"$set": {"files": existing_files}})
+                normalized_files = existing_files
             job_name = run.job_name
             if not job_name and run.job_id:
                 job = await Job.get(run.job_id)

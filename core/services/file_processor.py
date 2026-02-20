@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import traceback
 import unicodedata
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -67,6 +68,10 @@ class FileProcessorService:
             ')\\ncaixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)',
             ')\ncaixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)',
         )
+        s = s.replace(
+            '"Data": (report_date or data_do_arquivo(arquivo)),\\n    "Carteira": carteira,',
+            '"Data": (report_date or data_do_arquivo(arquivo)),\n    "Carteira": carteira,',
+        )
         legacy_line_patterns = [
             '        return pd.to_numeric(df[col], errors="coerce").fillna(default)',
             "        return pd.to_numeric(df[col], errors='coerce').fillna(default)",
@@ -92,7 +97,7 @@ class FileProcessorService:
         if '"Data": data_do_arquivo(arquivo),' in s:
             s = s.replace(
                 '"Data": data_do_arquivo(arquivo),',
-                '"Data": (report_date or data_do_arquivo(arquivo)),\\n    "Carteira": carteira,',
+                '"Data": (report_date or data_do_arquivo(arquivo)),\n    "Carteira": carteira,',
             )
         if "return out" not in s and "out = out.loc[mask].reset_index(drop=True)" in s:
             s = s.rstrip() + "\n\nreturn out\n"
@@ -365,7 +370,21 @@ class FileProcessorService:
         if not current_run:
             return 0
 
-        current_files = FileProcessorService._run_files_to_dicts(current_run)
+        current_files_raw = FileProcessorService._run_files_to_dicts(current_run)
+        artifacts_root = Path(os.getenv("ARTIFACTS_DIR", "/app/artifacts"))
+        current_files: List[Dict[str, Any]] = []
+        for existing in current_files_raw:
+            raw_path = str(existing.get("path") or "").strip()
+            if not raw_path:
+                current_files.append(existing)
+                continue
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = artifacts_root / raw_path
+            if candidate.exists():
+                current_files.append(existing)
+            else:
+                logger.warning("Dropping stale run file metadata (missing on disk): %s", raw_path)
         for existing in current_files:
             if existing.get("file_type") == "processed":
                 existing["is_latest"] = False
@@ -697,7 +716,15 @@ class FileProcessorService:
         Execute a Python processor script in an isolated process.
         """
         script_path = None
-        wrapped_script = FileProcessorService._build_wrapped_script(script, context)
+        final_processed_dir = Path(context["processed_dir"])
+        final_processed_dir.mkdir(parents=True, exist_ok=True)
+        staging_dir = final_processed_dir / f".tmp_exec_{uuid.uuid4().hex}"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+
+        exec_context = dict(context)
+        exec_context["processed_dir"] = str(staging_dir)
+
+        wrapped_script = FileProcessorService._build_wrapped_script(script, exec_context)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as handle:
             handle.write(wrapped_script)
             script_path = handle.name
@@ -708,7 +735,7 @@ class FileProcessorService:
                 timeout=300,
                 capture_output=True,
                 text=True,
-                cwd=context["processed_dir"],
+                cwd=str(staging_dir),
             )
 
             if result.returncode != 0:
@@ -718,8 +745,20 @@ class FileProcessorService:
             if result.stdout:
                 logger.info("Processor output:\n%s", result.stdout)
 
-            processed_dir = Path(context["processed_dir"])
-            return [str(path) for path in processed_dir.glob("*") if path.is_file()]
+            staged_files = [path for path in staging_dir.glob("*") if path.is_file()]
+            promoted_files: List[str] = []
+            for staged_file in sorted(staged_files):
+                target = final_processed_dir / staged_file.name
+                if target.exists():
+                    stem = target.stem
+                    suffix = target.suffix
+                    counter = 1
+                    while target.exists():
+                        target = final_processed_dir / f"{stem}_{counter:02d}{suffix}"
+                        counter += 1
+                staged_file.replace(target)
+                promoted_files.append(str(target))
+            return promoted_files
         except subprocess.TimeoutExpired as exc:
             logger.error("Processor timeout (5 minutes)")
             raise RuntimeError("Processor timeout") from exc
@@ -729,6 +768,16 @@ class FileProcessorService:
                     os.unlink(script_path)
                 except Exception:
                     pass
+            try:
+                if staging_dir.exists():
+                    for leftovers in staging_dir.glob("*"):
+                        try:
+                            leftovers.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    staging_dir.rmdir()
+            except Exception:
+                pass
 
     @staticmethod
     def _is_full_script(script: str) -> bool:

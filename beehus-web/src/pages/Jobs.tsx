@@ -252,6 +252,52 @@ function extractVisualConfigFromScript(script?: string): VisualProcessorConfig |
     return null;
 }
 
+function extractLegacyVisualConfigFromScript(script?: string): VisualProcessorConfig | null {
+    if (!script || !script.includes('VISUAL_BUILDER_')) return null;
+
+    const readArray = (prefixRegex: RegExp): string => {
+        const match = script.match(prefixRegex);
+        if (!match || !match[1]) return '';
+        try {
+            const arr = JSON.parse(match[1]);
+            if (Array.isArray(arr)) return arr.join(', ');
+        } catch (e) {
+            console.warn('Failed to parse visual aliases', e);
+        }
+        return '';
+    };
+    const readQuoted = (regex: RegExp, fallback = ''): string => {
+        const match = script.match(regex);
+        return match?.[1] ?? fallback;
+    };
+
+    const cfg: VisualProcessorConfig = normalizeVisualConfig({
+        ativo_direct_cols: readArray(/ativo_direct\s*=\s*txt\((\[[^\n]*\])\)/),
+        ativo_comp_base_cols: readArray(/ativo_base\s*=\s*txt\((\[[^\n]*\])\)/),
+        ativo_comp_part2_cols: readArray(/ativo_p2\s*=\s*txt\((\[[^\n]*\])\)/),
+        ativo_comp_part3_cols: readArray(/ativo_p3\s*=\s*txt\((\[[^\n]*\])\)/),
+        ativo_comp_part4_primary_cols: readArray(/ativo_p4_primary\s*=\s*txt\((\[[^\n]*\])\)/),
+        ativo_comp_part4_fallback_cols: readArray(/ativo_p4_fallback\s*=\s*txt\((\[[^\n]*\])\)/),
+        quant_cols: readArray(/qtd\s*=\s*num\((\[[^\n]*\]),\s*0\.0\)/),
+        pu_cols: readArray(/pu\s*=\s*num\((\[[^\n]*\]),\s*0\.0\)/),
+        saldo_bruto_cols: readArray(/sb\s*=\s*num\((\[[^\n]*\]),\s*0\.0\)/),
+        caixa_cols: readArray(/caixa_raw\s*=\s*txt\((\[[^\n]*\])\)\.str\.lower\(\)/),
+        moeda_fixa: readQuoted(/"Moeda":\s*"([^"]*)"/, 'BRL'),
+        ativo_separator: readQuoted(/_join_non_empty\(\[r\["a"\],\s*r\["b"\],\s*r\["c"\],\s*r\["d"\]\],\s*"([^"]*)"\)/, ' - '),
+        ativo_mode: /if\s+"compose"\s*==\s*"compose":/.test(script) ? 'compose' : 'direct',
+        filter_zero_enabled: /fz\s*=\s*num\(/.test(script),
+        filter_zero_cols: readArray(/fz\s*=\s*num\((\[[^\n]*\]),\s*0\.0\)/),
+        filter_empty_enabled: /fe\s*=\s*txt\(/.test(script),
+        filter_empty_cols: readArray(/fe\s*=\s*txt\((\[[^\n]*\])\)/),
+        only_enabled: /only_raw\s*=\s*txt\(/.test(script),
+        only_cols: readArray(/only_raw\s*=\s*txt\((\[[^\n]*\])\)\.str\.lower\(\)/),
+        only_true_values: readArray(/only_true\s*=\s*\[x\.strip\(\)\.lower\(\)\s+for\s+x\s+in\s+(\[[^\n]*\])\]/),
+        only_mode: /mask\s*&=\s*only_flag\s*if\s*"nao"\s*==\s*"sim"\s*else\s*~only_flag/.test(script) ? 'nao' : 'sim',
+    });
+
+    return cfg;
+}
+
 function scriptFromJobConfig(job: Job): string {
     const cfg = job.processing_config_json;
     if (cfg?.mode === 'visual') {
@@ -513,7 +559,9 @@ export default function Jobs() {
     };
 
     const openScriptEditor = (job: Job) => {
-        const extractedFromScript = extractVisualConfigFromScript(job.processing_script || '');
+        const extractedFromScript =
+            extractVisualConfigFromScript(job.processing_script || '')
+            || extractLegacyVisualConfigFromScript(job.processing_script || '');
         const visualFromConfig =
             job.processing_config_json?.mode === 'visual'
                 ? normalizeVisualConfig(job.processing_config_json.visual_config)
@@ -1431,7 +1479,17 @@ export default function Jobs() {
 
                         <div className="p-4 border-b border-white/10 flex items-center gap-2">
                             <button
-                                onClick={() => setScriptModal(prev => ({ ...prev, tab: 'visual' }))}
+                                onClick={() => {
+                                    const parsed =
+                                        extractVisualConfigFromScript(scriptModal.script)
+                                        || extractLegacyVisualConfigFromScript(scriptModal.script);
+                                    if (parsed) {
+                                        setVisualConfig(parsed);
+                                    } else if (scriptModal.tab === 'advanced') {
+                                        showToast('Advanced atual nao pode ser convertido automaticamente para Visual.', 'error');
+                                    }
+                                    setScriptModal(prev => ({ ...prev, tab: 'visual' }));
+                                }}
                                 className={`px-3 py-1.5 rounded text-sm ${scriptModal.tab === 'visual' ? 'bg-brand-600 text-white' : 'bg-white/5 text-slate-300'}`}
                             >
                                 Visual

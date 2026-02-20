@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext';
 import { formatDateTime } from '../utils/datetime';
 
 interface Run {
+    id?: string;
     run_id: string;
     job_id: string;
     job_name?: string;
@@ -19,6 +20,7 @@ interface Run {
     selected_filename?: string | null;
     selected_sheet?: string | null;
     processing_error?: string | null;
+    logs?: string[];
 }
 
 interface ProcessingFileOption {
@@ -39,6 +41,8 @@ export default function Runs() {
     const [sheetOptions, setSheetOptions] = useState<string[]>([]);
     const [selectedFile, setSelectedFile] = useState<string>('');
     const [selectedSheet, setSelectedSheet] = useState<string>('');
+    const [logModalRun, setLogModalRun] = useState<Run | null>(null);
+    const [logModalLoading, setLogModalLoading] = useState(false);
     const [wsConnected, setWsConnected] = useState(false);
     const [wsConnecting, setWsConnecting] = useState(false);
     const [wsError, setWsError] = useState<string | null>(null);
@@ -351,6 +355,24 @@ export default function Runs() {
         }
     };
 
+    const openLogModal = async (run: Run) => {
+        setLogModalLoading(true);
+        try {
+            const res = await axios.get<Run>(
+                `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/runs/${run.run_id}`,
+            );
+            setLogModalRun({
+                ...res.data,
+                run_id: res.data.run_id || res.data.id || run.run_id,
+            });
+        } catch (error) {
+            console.error('Failed to load run logs:', error);
+            showToast('Failed to load processing logs', 'error');
+        } finally {
+            setLogModalLoading(false);
+        }
+    };
+
     return (
         <Layout>
             <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -387,6 +409,7 @@ export default function Runs() {
                                 <th className="px-6 py-4">Job Name</th>
                                 <th className="px-6 py-4">Status</th>
                                 <th className="px-6 py-4">Processing</th>
+                                <th className="px-6 py-4">Log</th>
                                 <th className="px-6 py-4">Node</th>
                                 <th className="px-6 py-4">Actions</th>
                             </tr>
@@ -394,11 +417,11 @@ export default function Runs() {
                         <tbody className="divide-y divide-white/5 text-sm">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={9} className="px-6 py-8 text-center text-slate-400">Loading history...</td>
+                                    <td colSpan={10} className="px-6 py-8 text-center text-slate-400">Loading history...</td>
                                 </tr>
                             ) : runs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={9} className="px-6 py-8 text-center text-slate-500">No execution history found.</td>
+                                    <td colSpan={10} className="px-6 py-8 text-center text-slate-500">No execution history found.</td>
                                 </tr>
                             ) : (
                                 runs.map((run) => (
@@ -435,6 +458,14 @@ export default function Runs() {
                                                     <p className="text-xs text-slate-500">Sheet: {run.selected_sheet}</p>
                                                 )}
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <button
+                                                onClick={() => openLogModal(run)}
+                                                className="text-cyan-300 hover:text-cyan-200 font-medium"
+                                            >
+                                                View Log
+                                            </button>
                                         </td>
                                         <td className="px-6 py-4 text-slate-400">{run.node}</td>
                                         <td className="px-6 py-4">
@@ -557,6 +588,43 @@ export default function Runs() {
                             >
                                 {processingRunId === sheetModalRun.run_id ? 'Processing...' : 'Confirm'}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {logModalRun && (
+                <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+                    <div className="glass rounded-xl border border-white/10 p-6 w-full max-w-4xl space-y-4 max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-white">Processing Log</h3>
+                                <p className="text-xs text-slate-400">Run #{logModalRun.id?.slice?.(0, 8) || logModalRun.run_id.slice(0, 8)}</p>
+                            </div>
+                            <button
+                                onClick={() => setLogModalRun(null)}
+                                className="px-3 py-1 text-sm text-slate-300 hover:text-white"
+                            >
+                                Close
+                            </button>
+                        </div>
+
+                        {logModalRun.processing_error && (
+                            <div className="border border-red-500/30 bg-red-500/10 rounded-lg p-3">
+                                <p className="text-xs uppercase tracking-wide text-red-300 mb-1">Processing Error</p>
+                                <pre className="text-sm text-red-100 whitespace-pre-wrap">{logModalRun.processing_error}</pre>
+                            </div>
+                        )}
+
+                        <div className="border border-white/10 rounded-lg p-3 bg-black/30">
+                            <p className="text-xs uppercase tracking-wide text-slate-300 mb-2">Run Logs</p>
+                            {logModalLoading ? (
+                                <p className="text-sm text-slate-400">Loading...</p>
+                            ) : (
+                                <pre className="text-xs text-slate-200 whitespace-pre-wrap max-h-[55vh] overflow-y-auto">
+{(logModalRun.logs || []).join('\n') || 'No logs available'}
+                                </pre>
+                            )}
                         </div>
                     </div>
                 </div>

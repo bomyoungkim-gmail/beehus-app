@@ -4,7 +4,7 @@ Credentials Router - API endpoints for managing secure credentials.
 
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from core.models.mongo_models import Credential
 from core.security import encrypt_value
@@ -41,8 +41,7 @@ class CredentialResponse(BaseModel):
     created_at: str
     updated_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Endpoints

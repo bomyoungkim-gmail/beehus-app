@@ -53,7 +53,7 @@ class InboxIntegration(Document):
     status: str = "active"  # active, revoked, error
     email_address: Optional[str] = None
     token_ciphertext: str  # Encrypted refresh token
-    scopes: List[str] = []
+    scopes: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=get_now)
     updated_at: datetime = Field(default_factory=get_now)
     
@@ -84,7 +84,7 @@ class Credential(Document):
     label: str
     username: str
     encrypted_password: str
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
     carteira: Optional[str] = None
     created_at: datetime = Field(default_factory=get_now)
     updated_at: datetime = Field(default_factory=get_now)
@@ -100,7 +100,7 @@ class Job(Document):
     name: str
     connector: Indexed(str)  # Connector name (e.g., "example", "linkedin")
     credential_id: Optional[str] = None  # Reference to Credential document
-    params: dict = {}  # Job-specific parameters
+    params: dict = Field(default_factory=dict)  # Job-specific parameters
     schedule: Optional[str] = None  # Cron expression for periodic execution
     status: str = "active"  # active, paused, deleted
     
@@ -155,18 +155,19 @@ class Run(Document):
     job_id: Indexed(str)
     job_name: Optional[str] = None
     connector: Optional[str] = None  # Connector name for display
-    status: str = "queued"  # queued, running, success, failed
+    execution_node: Optional[str] = None
+    status: Indexed(str) = "queued"  # queued, running, success, failed
     attempt: int = 1
     celery_task_id: Optional[str] = None  # For task cancellation
     error_summary: Optional[str] = None
-    logs: List[str] = []
+    logs: List[str] = Field(default_factory=list)
     processing_logs: List[str] = Field(default_factory=list)
     vnc_url: Optional[str] = None
     report_date: Optional[str] = None  # Position Date (DD/MM/YYYY)
     history_date: Optional[str] = None  # History Date (DD/MM/YYYY)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=get_now)
+    created_at: Indexed(datetime) = Field(default_factory=get_now)
     updated_at: Optional[datetime] = Field(default_factory=get_now)
     files: List[RunFile] = Field(default_factory=list)
     processing_status: str = "not_required"

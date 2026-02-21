@@ -187,7 +187,7 @@ services:
       context: ./beehus-web
       dockerfile: Dockerfile
     working_dir: /app
-    command: sh -c "npm install && rm -rf node_modules/.vite && npm rebuild esbuild && npm run dev -- --host"
+    command: sh -c "npm run dev -- --host"
     volumes:
       - ./beehus-web:/app
       - /app/node_modules

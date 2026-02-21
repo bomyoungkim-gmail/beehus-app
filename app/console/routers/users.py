@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 from app.console.routers.auth import get_current_user
 from core.auth import create_access_token, create_refresh_token, verify_password, get_password_hash
@@ -35,8 +35,7 @@ class UserOut(BaseModel):
     created_at: datetime
     last_login: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AcceptInvitationRequest(BaseModel):
@@ -106,7 +105,7 @@ async def update_user(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return await user_service.update_user(current_user, user_id, payload.dict())
+        return await user_service.update_user(current_user, user_id, payload.model_dump())
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:

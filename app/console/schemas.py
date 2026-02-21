@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field, ConfigDict
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from core.schemas.enums import JobStatus, RunStatus
@@ -8,7 +8,7 @@ class JobCreate(BaseModel):
     name: str
     connector: str
     credential_id: Optional[str] = None
-    params: Dict[str, Any] = {}
+    params: Dict[str, Any] = Field(default_factory=dict)
     schedule: Optional[str] = None  # Cron expression for periodic execution
     
     # Export options
@@ -24,7 +24,7 @@ class JobCreate(BaseModel):
     enable_processing: bool = False
     processing_config_json: Optional[Dict[str, Any]] = None
     processing_script: Optional[str] = None
-    sheet_aliases: List[str] = []
+    sheet_aliases: List[str] = Field(default_factory=list)
 
     @field_validator("credential_id", mode="before")
     @classmethod
@@ -40,9 +40,8 @@ class JobResponse(JobCreate):
     id: str
     status: JobStatus
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class JobUpdate(BaseModel):
@@ -55,6 +54,7 @@ class RunResponse(BaseModel):
     id: str
     job_id: str
     connector: Optional[str] = None
+    execution_node: Optional[str] = None
     status: RunStatus
     report_date: Optional[str] = None
     started_at: Optional[datetime]
@@ -62,12 +62,11 @@ class RunResponse(BaseModel):
     created_at: datetime
     error_summary: Optional[str]
     vnc_url: Optional[str] = None
-    logs: List[str] = []
-    processing_logs: List[str] = []
+    logs: List[str] = Field(default_factory=list)
+    processing_logs: List[str] = Field(default_factory=list)
     processing_status: str = "not_required"
     selected_filename: Optional[str] = None
     selected_sheet: Optional[str] = None
     processing_error: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)

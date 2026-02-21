@@ -4,11 +4,34 @@ Replaces SQLAlchemy/raw SQL implementation.
 """
 
 import os
+import json
 import logging
+import redis.asyncio as redis
 from core.models.mongo_models import Run
 from core.utils.date_utils import get_now
+from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Module-level Redis connection pool — created once, reused per worker process.
+_redis_pool: redis.ConnectionPool | None = None
+
+
+def _get_redis_pool() -> redis.ConnectionPool:
+    """Return the module-level Redis connection pool, creating it on first call."""
+    global _redis_pool
+    if _redis_pool is None:
+        _redis_pool = redis.ConnectionPool.from_url(
+            settings.REDIS_URL,
+            max_connections=10,
+            decode_responses=False,
+        )
+    return _redis_pool
+
+
+def _get_redis_client() -> redis.Redis:
+    """Return a Redis client backed by the shared connection pool."""
+    return redis.Redis(connection_pool=_get_redis_pool())
 
 
 class RunRepository:
@@ -29,7 +52,12 @@ class RunRepository:
             status: New status (queued, running, success, failed)
             error: Optional error message
         """
-        update_dict = {"status": status}
+        execution_node = os.getenv("HOSTNAME", "worker")
+        update_dict = {
+            "status": status,
+            "execution_node": execution_node,
+            "updated_at": get_now(),
+        }
         
         if error is not None:
             update_dict["error_summary"] = error
@@ -55,21 +83,16 @@ class RunRepository:
                 )
             
             if result.matched_count > 0:
-                # Publish to Redis for WebSockets
+                # Publish to Redis for WebSockets using shared connection pool
                 try:
-                    import redis.asyncio as redis
-                    import json
-                    from core.config import settings
-                    
-                    redis_client = redis.from_url(settings.REDIS_URL)
+                    redis_client = _get_redis_client()
                     message = {
                         "run_id": run_id,
                         "status": status,
-                        "node": os.getenv("HOSTNAME", "worker"),
+                        "node": execution_node,
                         "timestamp": get_now().isoformat()
                     }
                     await redis_client.publish("run_updates", json.dumps(message))
-                    await redis_client.close()
                 except Exception as redis_error:
                     # Don't fail the job if Redis publishing fails
                     logger.error(f"Redis publish failed: {redis_error}")

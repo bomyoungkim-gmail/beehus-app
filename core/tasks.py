@@ -8,7 +8,7 @@ from django_config import celery_app
 from core.worker.executor import SeleniumExecutor
 from core.connectors.registry import ConnectorRegistry
 from core.repositories import repo
-from core.models.mongo_models import Job, Run, Credential
+from core.models.mongo_models import Job, Run, Credential, OtpAudit
 from core.db import init_db
 from core.security import decrypt_value
 from core.config import settings
@@ -437,7 +437,9 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     await log(f"File capture error: {file_error}")
 
                 result_payload = (
-                    result.dict()
+                    result.model_dump()
+                    if hasattr(result, "model_dump")
+                    else getattr(result, "dict")()
                     if hasattr(result, "dict")
                     else {"success": result.success, "data": result.data}
                 )
@@ -593,11 +595,54 @@ def otp_request_task(self, run_id: str, workspace_id: str, otp_rule_id: str = No
     Returns:
         dict: OTP request result
     """
-    # TODO: Implement OTP request logic
-    # This would publish to RabbitMQ otp.request queue
-    # For now, just log
-    logger.info(f"📧 OTP request: run_id={run_id}, workspace={workspace_id}")
-    return {"status": "otp_requested", "run_id": run_id}
+    async def _request_otp():
+        """Persist OTP request audit and publish request to Redis-backed channel/list."""
+        await init_db()
+
+        request_payload = {
+            "run_id": str(run_id),
+            "workspace_id": str(workspace_id),
+            "otp_rule_id": str(otp_rule_id) if otp_rule_id else None,
+            "requested_at": get_now().isoformat(),
+        }
+
+        # Persist audit trail for observability/debugging
+        audit = OtpAudit(
+            run_id=str(run_id),
+            workspace_id=str(workspace_id),
+            otp_rule_id=str(otp_rule_id) if otp_rule_id else None,
+            status="requested",
+            detail="OTP request queued for inbox worker",
+        )
+        await audit.save()
+
+        # Publish request for async inbox worker consumption
+        redis_client = None
+        try:
+            import redis.asyncio as redis
+
+            redis_client = redis.from_url(settings.REDIS_URL)
+            payload_json = json.dumps(request_payload)
+            await redis_client.lpush("otp:requests", payload_json)
+            await redis_client.publish("otp.request", payload_json)
+        finally:
+            if redis_client is not None:
+                await redis_client.close()
+
+        logger.info(
+            "📧 OTP request queued: run_id=%s workspace_id=%s otp_rule_id=%s",
+            run_id,
+            workspace_id,
+            otp_rule_id,
+        )
+        return {
+            "status": "otp_requested",
+            "run_id": str(run_id),
+            "workspace_id": str(workspace_id),
+            "otp_rule_id": str(otp_rule_id) if otp_rule_id else None,
+        }
+
+    return asyncio.run(_request_otp())
 
 
 # ---------------------------------------------------

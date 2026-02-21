@@ -41,7 +41,7 @@ class FileProcessorService:
             if hasattr(f, "model_dump"):
                 items.append(f.model_dump())
             elif hasattr(f, "dict"):
-                items.append(f.dict())
+                items.append(getattr(f, "dict")())
             elif isinstance(f, dict):
                 items.append(f)
         return items
@@ -93,6 +93,16 @@ class FileProcessorService:
                 'caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])',
                 'caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])\n'
                 'caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)',
+            )
+        if (
+            'caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)' in s
+            and "ativo_hint = ativo_direct.str.lower()" not in s
+        ):
+            s = s.replace(
+                'caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)',
+                'caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)\n'
+                "ativo_hint = ativo_direct.str.lower()\n"
+                'caixa = caixa | ativo_hint.str.contains("conta corrente|saldo em conta", na=False)',
             )
         if '"Data": data_do_arquivo(arquivo),' in s:
             s = s.replace(
@@ -177,9 +187,28 @@ class FileProcessorService:
         return None
 
     @staticmethod
+    def _script_allows_row_reduction(script: Optional[str]) -> bool:
+        s = (script or "").lower()
+        if not s:
+            return False
+        # Common filtering patterns in visual and advanced scripts
+        markers = [
+            "out = out.loc[mask]",
+            "mask &=",
+            ".query(",
+            ".dropna(",
+            ".isin(",
+            "filter_zero_enabled",
+            "filter_empty_enabled",
+            "only_enabled",
+        ]
+        return any(m in s for m in markers)
+
+    @staticmethod
     def _validate_processed_outputs(
         file_paths: List[str],
         expected_input_rows: Optional[int] = None,
+        allow_row_reduction: bool = False,
     ) -> Optional[str]:
         if not file_paths:
             return "Processor did not generate output files."
@@ -201,7 +230,17 @@ class FileProcessorService:
                 if (
                     expected_input_rows is not None
                     and expected_input_rows > 0
+                    and output_rows > expected_input_rows
+                ):
+                    return (
+                        "Processed output has more rows than input: "
+                        f"input_rows={expected_input_rows}, output_rows={output_rows}."
+                    )
+                if (
+                    expected_input_rows is not None
+                    and expected_input_rows > 0
                     and output_rows < expected_input_rows
+                    and not allow_row_reduction
                 ):
                     return (
                         "Data loss detected in processing: "
@@ -317,9 +356,11 @@ class FileProcessorService:
                 selected_filename,
                 selected_sheet,
             )
+            allow_row_reduction = FileProcessorService._script_allows_row_reduction(processor_script)
             validation_error = FileProcessorService._validate_processed_outputs(
                 renamed_files,
                 expected_input_rows=expected_input_rows,
+                allow_row_reduction=allow_row_reduction,
             )
             if validation_error:
                 await FileProcessorService._append_processing_log(run_id, validation_error)
@@ -821,9 +862,12 @@ class FileProcessorService:
                 "",
                 "try:",
                 "    import pandas as pd",
+                "except Exception:",
+                "    pd = None",
+                "try:",
                 "    import numpy as np",
-                "except ImportError:",
-                "    pass",
+                "except Exception:",
+                "    np = None",
                 "",
                 "def ptbr_to_float(x):",
                 "    if x is None:",
@@ -885,6 +929,8 @@ class FileProcessorService:
         auto_wrapper = "\n".join(
             [
                 "def _load_input_dataframe(arquivo, aba):",
+                "    if pd is None:",
+                "        raise RuntimeError('Pandas is not available in runtime environment')",
                 "    if not arquivo:",
                 "        return None",
                 "    caminho = Path(original_dir) / arquivo",

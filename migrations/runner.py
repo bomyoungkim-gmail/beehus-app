@@ -1,7 +1,7 @@
 import os
 import sys
 import importlib.util
-from datetime import datetime
+from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 import asyncio
 
@@ -45,7 +45,7 @@ class MigrationRunner:
                 await module.up(self.db)
                 await self.migrations_col.insert_one({
                     'name': filename,
-                    'applied_at': datetime.utcnow()
+                    'applied_at': datetime.now(timezone.utc)
                 })
                 print(f"✅ Applied {filename}")
                 pending_count += 1

@@ -4,7 +4,7 @@ Downloads API router - Provides endpoints for listing and downloading processed 
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -53,13 +53,13 @@ class ProcessingFileOption(BaseModel):
     filename: str
     size_bytes: Optional[int]
     is_excel: bool
-    sheet_options: List[str] = []
+    sheet_options: List[str] = Field(default_factory=list)
 
 
 class ProcessingColumnsResponse(BaseModel):
     filename: str
     selected_sheet: Optional[str] = None
-    columns: List[str] = []
+    columns: List[str] = Field(default_factory=list)
 
 
 class SelectFileRequest(BaseModel):
@@ -90,7 +90,7 @@ def _file_meta_to_dict(file_meta: Any) -> Dict[str, Any]:
     if hasattr(file_meta, "model_dump"):
         return file_meta.model_dump()
     if hasattr(file_meta, "dict"):
-        return file_meta.dict()
+        return getattr(file_meta, "dict")()
     if isinstance(file_meta, dict):
         return file_meta
     raise ValueError("Unsupported run file metadata format")

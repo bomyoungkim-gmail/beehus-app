@@ -90,18 +90,30 @@ export default function Credentials() {
     setCreating(true);
 
     try {
+      const payload: any = {
+        workspace_id: formData.workspace_id,
+        label: formData.label,
+        username: formData.username,
+        metadata: formData.metadata,
+        carteira: formData.carteira,
+      };
+
+      if (!editingId || formData.password.trim()) {
+        payload.password = formData.password;
+      }
+
       if (editingId) {
         // Update existing credential
         await axios.put(
           `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/credentials/${editingId}`,
-          formData,
+          payload,
         );
         showToast("Credential updated successfully", "success");
       } else {
         // Create new credential
         await axios.post(
           `${import.meta.env.VITE_API_URL || "http://localhost:8000"}/credentials`,
-          formData,
+          payload,
         );
         showToast("Credential created successfully", "success");
       }

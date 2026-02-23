@@ -5,6 +5,8 @@ __pycache__/
 .venv/
 venv/
 ENV/
+.pytest_tmp/
+.pytest_cache_local/
 .env/
 config/env/.env
 

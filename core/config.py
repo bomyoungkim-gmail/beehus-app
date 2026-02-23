@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Selenium
     SELENIUM_REMOTE_URL: str = "http://selenium-hub:4444/wd/hub"  # Selenium Grid Hub
     VNC_URL_BASE: str = "http://localhost"
+    VNC_HOST_PORT_BASE: int = 7901
 
     # Security
     DATABASE_ENCRYPTION_KEY: str = "qQkYhPB2wmkqTLcJxmiiKjYHrnJpDVRtMne4cxd8SpM="

@@ -12,6 +12,49 @@ interface RunData {
     vnc_url?: string;
 }
 
+function normalizeRunVncUrl(rawUrl: string | null | undefined, hostPortBase: number): string | null {
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    const pageProtocol = window.location.protocol;
+    const pageHost = window.location.hostname;
+
+    // Backend may publish localhost URLs from inside containers.
+    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+      parsed.hostname = pageHost;
+    }
+
+    // If app is served via HTTPS, VNC endpoint must also be HTTPS/WSS.
+    if (pageProtocol === "https:" && parsed.protocol === "http:") {
+      parsed.protocol = "https:";
+    }
+
+    // Local Docker maps VNC ports to 1790x; backend may still publish 790x.
+    const currentPort = Number(parsed.port || "0");
+    if ((pageHost === "localhost" || pageHost === "127.0.0.1") && currentPort >= 7901 && currentPort <= 7909) {
+      const offset = currentPort - 7901;
+      parsed.port = String(hostPortBase + offset);
+    }
+
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+function buildVncUrl(base: string, port: number, password: string): string {
+  const baseUrl = base.includes("://") ? base : `http://${base}`;
+  const url = new URL(baseUrl);
+  url.port = String(port);
+  url.pathname = "/";
+  url.search = "";
+  url.searchParams.set("autoconnect", "true");
+  url.searchParams.set("resize", "scale");
+  url.searchParams.set("path", "websockify");
+  url.searchParams.set("password", password);
+  return url.toString();
+}
+
 export default function LiveView() {
   const { runId } = useParams();
   const navigate = useNavigate();
@@ -91,15 +134,24 @@ export default function LiveView() {
   );
 
   const isLocalEvasion = run?.connector?.includes('jpmorgan');
-  const baseUrl = import.meta.env.VITE_VNC_URL_BASE || 'http://localhost';
+  const baseUrl = import.meta.env.VITE_VNC_URL_BASE || window.location.origin;
+  const defaultHostPortBase =
+    window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+      ? 17901
+      : 7901;
+  const parsedHostPortBase = Number(import.meta.env.VITE_VNC_HOST_PORT_BASE || defaultHostPortBase);
+  const hostPortBase = Number.isFinite(parsedHostPortBase) ? parsedHostPortBase : defaultHostPortBase;
   const vncPassword = import.meta.env.VITE_VNC_PASSWORD || 'secret';
 
-  const fallbackVncPort = isLocalEvasion ? '7901' : null; // Local worker only
+  const fallbackVncPort = isLocalEvasion ? hostPortBase : null; // Local worker only
   const fallbackVncUrl = fallbackVncPort
-      ? `${baseUrl}:${fallbackVncPort}/?autoconnect=true&resize=scale&password=${vncPassword}`
+      ? buildVncUrl(baseUrl, fallbackVncPort, vncPassword)
       : null;
 
-  const runVncUrl = run?.vnc_url ? `${run.vnc_url}/?autoconnect=true&resize=scale&password=${vncPassword}` : null;
+  const normalizedRunVncBase = normalizeRunVncUrl(run?.vnc_url, hostPortBase);
+  const runVncUrl = normalizedRunVncBase
+    ? `${normalizedRunVncBase}/?autoconnect=true&resize=scale&path=websockify&password=${vncPassword}`
+    : null;
   const vncUrl = runVncUrl || fallbackVncUrl;
   const fullVncUrl = import.meta.env.VITE_VNC_URL || vncUrl || undefined;
 

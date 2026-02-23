@@ -18,7 +18,7 @@ class CredentialCreate(BaseModel):
     workspace_id: str
     label: str
     username: str
-    password: str
+    password: str = Field(min_length=1)
     metadata: dict = Field(default_factory=dict)
     carteira: Optional[str] = None
 
@@ -129,7 +129,9 @@ async def update_credential(credential_id: str, cred_update: CredentialUpdate):
     if cred_update.username is not None:
         credential.username = cred_update.username
     if cred_update.password is not None:
-        credential.encrypted_password = encrypt_value(cred_update.password)
+        # Keep existing password when edit payload sends empty string.
+        if cred_update.password.strip():
+            credential.encrypted_password = encrypt_value(cred_update.password)
     if cred_update.metadata is not None:
         credential.metadata = cred_update.metadata
     if cred_update.carteira is not None:

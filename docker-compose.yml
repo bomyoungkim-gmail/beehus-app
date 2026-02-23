@@ -170,7 +170,7 @@ services:
     command: uvicorn app.console.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
     env_file: *app-env-file
@@ -194,8 +194,9 @@ services:
     ports:
       - "5173:5173"  # Same port inside/outside - no confusion!
     environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_API_URL=${VITE_API_URL:-http://127.0.0.1:8000}
       - VITE_VNC_URL_BASE=${VITE_VNC_URL_BASE:-http://localhost}
+      - VITE_VNC_HOST_PORT_BASE=${VITE_VNC_HOST_PORT_BASE:-17901}
       - VITE_VNC_PASSWORD=${VITE_VNC_PASSWORD:-secret}
     depends_on:
       - app-console

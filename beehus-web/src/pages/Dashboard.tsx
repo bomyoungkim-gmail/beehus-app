@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Layout from '../components/Layout';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
@@ -25,12 +25,20 @@ export default function Dashboard() {
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'all' | 'running' | 'queued'>('all');
+  const fetchInFlightRef = useRef(false);
   
   // Modal state
 
 
   useEffect(() => {
     const fetchData = async () => {
+      if (fetchInFlightRef.current) {
+        return;
+      }
+      if (document.hidden) {
+        return;
+      }
+      fetchInFlightRef.current = true;
       try {
         const [statsRes, runsRes] = await Promise.all([
           axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/dashboard/stats`),
@@ -42,12 +50,24 @@ export default function Dashboard() {
         console.error('Failed to fetch dashboard data:', error);
       } finally {
         setLoading(false);
+        fetchInFlightRef.current = false;
       }
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 5000); // Refresh every 5s
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchData, 15000); // Refresh every 15s
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchData();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
 
 

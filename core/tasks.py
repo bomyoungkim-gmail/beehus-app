@@ -31,6 +31,36 @@ SELENIUM_MAX_SLOTS = max(
 )
 
 
+def _resolve_credential_password(credential: Credential, execution_params: dict) -> tuple[str | None, str]:
+    """
+    Resolve the best password source for a credential.
+
+    Order:
+    1) Decrypted credential password (expected path)
+    2) Legacy plaintext accidentally saved in encrypted_password
+    3) Explicit job params password/pass
+    4) Credential metadata password/pass
+    """
+    decrypted_password = decrypt_value(credential.encrypted_password)
+    if decrypted_password:
+        return decrypted_password, "credential_decrypted"
+
+    raw_encrypted = str(credential.encrypted_password or "").strip()
+    if raw_encrypted and not raw_encrypted.startswith("gAAAAA"):
+        return raw_encrypted, "credential_legacy_plaintext"
+
+    params_password = (execution_params.get("password") or execution_params.get("pass") or "").strip()
+    if params_password:
+        return params_password, "job_params"
+
+    metadata = credential.metadata if isinstance(credential.metadata, dict) else {}
+    metadata_password = (metadata.get("password") or metadata.get("pass") or "").strip()
+    if metadata_password:
+        return metadata_password, "credential_metadata"
+
+    return None, "missing"
+
+
 def _to_ddmmyyyy(value: str | None) -> str | None:
     if not value:
         return None
@@ -218,20 +248,33 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 if credential_from_link:
                     # Explicitly linked credentials are source of truth.
                     execution_params["username"] = credential.username
-                    decrypted_password = decrypt_value(credential.encrypted_password)
-                    if decrypted_password:
-                        execution_params["password"] = decrypted_password
+                    resolved_password, password_source = _resolve_credential_password(
+                        credential,
+                        execution_params,
+                    )
+                    if resolved_password:
+                        execution_params["password"] = resolved_password
+                        if password_source != "credential_decrypted":
+                            await log(
+                                "⚠️ Credential password decryption failed;"
+                                f" using fallback source={password_source} for credential {credential.id}"
+                            )
                     else:
                         await log(
-                            f"⚠️ Credential password decryption failed for credential {credential.id}"
+                            "❌ Credential password unavailable after decryption/fallbacks"
+                            f" for credential {credential.id}. Check DATABASE_ENCRYPTION_KEY"
+                            " and credential password data."
                         )
                 else:
                     # Fallback mode: keep manual values if present, fill only gaps.
                     execution_params.setdefault("username", credential.username)
                     if not (execution_params.get("password") or execution_params.get("pass")):
-                        decrypted_password = decrypt_value(credential.encrypted_password)
-                        if decrypted_password:
-                            execution_params["password"] = decrypted_password
+                        resolved_password, _ = _resolve_credential_password(
+                            credential,
+                            execution_params,
+                        )
+                        if resolved_password:
+                            execution_params["password"] = resolved_password
 
                 metadata = credential.metadata if isinstance(credential.metadata, dict) else {}
                 if metadata:
@@ -331,6 +374,12 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
             executor = SeleniumExecutor(use_local=use_local, download_dir=chrome_download_dir)
             executor.start()
             await log(f"🔌 Connected to Selenium Grid: {executor.driver.session_id}")
+            await log(
+                "📺 VNC mapping:"
+                f" node_id={executor.node_id or '-'}"
+                f" node_uri={executor.node_uri or '-'}"
+                f" vnc_url={executor.vnc_url or '-'}"
+            )
             if run:
                 if executor.vnc_url:
                     await run.update({"$set": {"vnc_url": executor.vnc_url}})

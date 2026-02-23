@@ -23,7 +23,7 @@ for i in {1..20}; do
   sleep 0.5
 done
 if ! pgrep -x Xvfb >/dev/null; then
-  echo "Xvfb failed to старт; check /app/artifacts/xvfb.log"
+  echo "Xvfb failed to start; check /app/artifacts/xvfb.log"
   exit 1
 fi
 

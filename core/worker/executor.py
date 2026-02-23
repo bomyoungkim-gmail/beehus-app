@@ -94,7 +94,7 @@ class SeleniumExecutor:
                 self._enable_auto_download()
                 logger.info(f"✅ Created Local UC driver session: {self.driver.session_id}")
                 self.node_id = "LOCAL_WORKER_CONTAINER"
-                self.vnc_url = f"{settings.VNC_URL_BASE}:7901"
+                self.vnc_url = f"{settings.VNC_URL_BASE}:{settings.VNC_HOST_PORT_BASE}"
             except Exception as e:
                 logger.error(f"❌ Failed to start local driver: {e}")
                 raise
@@ -211,7 +211,7 @@ class SeleniumExecutor:
             match = re.search(r"chrome-node-(\d+)", value)
             if match:
                 node_num = int(match.group(1))
-                return f"{settings.VNC_URL_BASE}:{7901 + node_num}"
+                return f"{settings.VNC_URL_BASE}:{settings.VNC_HOST_PORT_BASE + node_num}"
         return None
 
     def get_node_info(self):

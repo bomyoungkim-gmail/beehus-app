@@ -9,7 +9,14 @@ from typing import List, Optional
 from core.models.mongo_models import Job, Run, Credential
 from core.tasks import scrape_task
 from django_config import celery_app  # noqa: F401 – used by retry_run
-from app.console.schemas import JobCreate, JobResponse, JobUpdate, RunResponse
+from app.console.schemas import (
+    JobCreate,
+    JobResponse,
+    JobUpdate,
+    ProcessingScriptPreviewRequest,
+    ProcessingScriptPreviewResponse,
+    RunResponse,
+)
 from core.services.visual_processing import (
     build_script_from_processing_config,
     extract_visual_config_from_script,
@@ -24,6 +31,19 @@ router = APIRouter(tags=["jobs"])
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
+
+@router.post(
+    "/jobs/processing/preview-script",
+    response_model=ProcessingScriptPreviewResponse,
+)
+async def preview_processing_script(payload: ProcessingScriptPreviewRequest):
+    """Validate processing config and return generated script + normalized config."""
+    script, normalized_config = build_script_from_processing_config(payload.processing_config_json)
+    if not normalized_config:
+        raise HTTPException(status_code=400, detail="Invalid processing_config_json payload.")
+    if normalized_config.get("mode") == "advanced" and not script:
+        raise HTTPException(status_code=400, detail="Advanced processing script is empty.")
+    return ProcessingScriptPreviewResponse(script=script, processing_config_json=normalized_config)
 
 @router.post("/jobs", response_model=JobResponse)
 async def create_job(job_in: JobCreate):
@@ -51,21 +71,13 @@ async def create_job(job_in: JobCreate):
     job_payload = job_in.model_dump()
     processing_config = job_payload.get("processing_config_json")
     if processing_config is not None:
-        generated_script, normalized_config = build_script_from_processing_config(processing_config)
-        if not normalized_config:
-            raise HTTPException(status_code=400, detail="Invalid processing_config_json payload.")
-        if normalized_config.get("mode") == "advanced" and not generated_script:
-            raise HTTPException(status_code=400, detail="Advanced processing script is empty.")
+        generated_script, normalized_config = _normalize_processing_config(processing_config)
         job_payload["processing_config_json"] = normalized_config
         job_payload["processing_script"] = generated_script
     elif job_payload.get("processing_script"):
         script = str(job_payload["processing_script"]).strip()
         job_payload["processing_script"] = script
-        visual_cfg = extract_visual_config_from_script(script)
-        if visual_cfg:
-            job_payload["processing_config_json"] = {"mode": "visual", "visual_config": visual_cfg}
-        else:
-            job_payload["processing_config_json"] = {"mode": "advanced", "advanced_script": script}
+        job_payload["processing_config_json"] = _derive_processing_config_from_script(script)
 
     job = Job(**job_payload)
     await job.save()
@@ -103,11 +115,7 @@ async def update_job(job_id: str, job_update: JobUpdate):
             job.processing_script = None
 
     if job_update.processing_config_json is not None:
-        script, normalized = build_script_from_processing_config(job_update.processing_config_json)
-        if not normalized:
-            raise HTTPException(status_code=400, detail="Invalid processing_config_json payload.")
-        if normalized.get("mode") == "advanced" and not script:
-            raise HTTPException(status_code=400, detail="Advanced processing script is empty.")
+        script, normalized = _normalize_processing_config(job_update.processing_config_json)
         job.processing_config_json = normalized
         job.processing_script = script
 
@@ -115,11 +123,7 @@ async def update_job(job_id: str, job_update: JobUpdate):
         script = job_update.processing_script.strip()
         job.processing_script = script or None
         if script:
-            visual_cfg = extract_visual_config_from_script(script)
-            if visual_cfg:
-                job.processing_config_json = {"mode": "visual", "visual_config": visual_cfg}
-            else:
-                job.processing_config_json = {"mode": "advanced", "advanced_script": script}
+            job.processing_config_json = _derive_processing_config_from_script(script)
         else:
             job.processing_config_json = None
 
@@ -250,3 +254,19 @@ def _build_execution_params(job: Job) -> dict:
         "history_date": job.history_date,
     })
     return params
+
+
+def _normalize_processing_config(processing_config: dict) -> tuple[str, dict]:
+    script, normalized_config = build_script_from_processing_config(processing_config)
+    if not normalized_config:
+        raise HTTPException(status_code=400, detail="Invalid processing_config_json payload.")
+    if normalized_config.get("mode") == "advanced" and not script:
+        raise HTTPException(status_code=400, detail="Advanced processing script is empty.")
+    return script, normalized_config
+
+
+def _derive_processing_config_from_script(script: str) -> dict:
+    visual_cfg = extract_visual_config_from_script(script)
+    if visual_cfg:
+        return {"mode": "visual", "visual_config": visual_cfg}
+    return {"mode": "advanced", "advanced_script": script}

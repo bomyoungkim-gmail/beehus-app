@@ -4,6 +4,7 @@ Executes Python scripts associated with credentials.
 """
 
 import logging
+import importlib.util
 import os
 import re
 import subprocess
@@ -380,6 +381,12 @@ class FileProcessorService:
                 run_id,
                 f"Executing processor script for file={selected_filename or '-'} sheet={selected_sheet or '-'}",
             )
+
+            dependency_error = FileProcessorService._check_runtime_dependencies(processor_script)
+            if dependency_error:
+                logger.error("Processing runtime dependency check failed for run %s: %s", run_id, dependency_error)
+                await FileProcessorService._append_processing_log(run_id, dependency_error)
+                return [], processor_snapshot, dependency_error
 
             processed_files = await FileProcessorService._execute_processor(
                 processor_script,
@@ -970,7 +977,10 @@ class FileProcessorService:
             [
                 "def _load_input_dataframe(arquivo, aba):",
                 "    if pd is None:",
-                "        raise RuntimeError('Pandas is not available in runtime environment')",
+                "        raise RuntimeError(",
+                "            'Pandas is required for auto-generated processing scripts but is not installed in this runtime. "
+                "Install pandas (and openpyxl/xlrd for Excel files) in the celery-worker image and redeploy.'",
+                "        )",
                 "    if not arquivo:",
                 "        return None",
                 "    caminho = Path(original_dir) / arquivo",
@@ -1012,3 +1022,21 @@ class FileProcessorService:
             ]
         )
         return f"{preamble}\n# User script (low-code mode)\n{auto_wrapper}"
+
+    @staticmethod
+    def _check_runtime_dependencies(script: str) -> Optional[str]:
+        normalized_script = (script or "").rstrip() + "\n"
+        uses_low_code_wrapper = not (
+            FileProcessorService._is_full_script(normalized_script)
+            and not FileProcessorService._should_force_low_code(normalized_script)
+        )
+        needs_pandas = uses_low_code_wrapper or bool(
+            re.search(r"\bimport\s+pandas\b|\bfrom\s+pandas\s+import\b|\bpd\.", normalized_script)
+        )
+        if needs_pandas and importlib.util.find_spec("pandas") is None:
+            return (
+                "Missing runtime dependency: pandas. "
+                "Install pandas (and openpyxl/xlrd for Excel processing) in the celery-worker image, "
+                "rebuild the image, and restart the worker service."
+            )
+        return None

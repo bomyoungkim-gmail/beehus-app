@@ -50,6 +50,15 @@ class JobUpdate(BaseModel):
     processing_script: Optional[str] = None
     sheet_aliases: Optional[List[str]] = None
 
+
+class ProcessingScriptPreviewRequest(BaseModel):
+    processing_config_json: Dict[str, Any]
+
+
+class ProcessingScriptPreviewResponse(BaseModel):
+    script: str
+    processing_config_json: Dict[str, Any]
+
 class RunResponse(BaseModel):
     id: str
     job_id: str

@@ -155,11 +155,11 @@ def main() -> int:
         all_findings.extend(audit_file(py_file))
 
     if not all_findings:
-        print("✅ No legacy patterns found in scanned paths.")
+        print("No legacy patterns found in scanned paths.")
         return 0
 
     all_findings.sort(key=lambda f: (str(f.file_path), f.line, f.kind))
-    print(f"⚠️  Found {len(all_findings)} legacy pattern(s):")
+    print(f"Found {len(all_findings)} legacy pattern(s):")
     for finding in all_findings:
         rel = finding.file_path.relative_to(project_root)
         print(f"- {rel}:{finding.line} [{finding.kind}] {finding.message}")

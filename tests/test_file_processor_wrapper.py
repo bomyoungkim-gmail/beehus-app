@@ -1,4 +1,5 @@
 from core.services.file_processor import FileProcessorService
+from unittest.mock import patch
 
 
 def _context():
@@ -55,3 +56,17 @@ def test_normalize_processed_names_uses_positions_pattern(tmp_path):
     output_name = renamed[0].split("\\")[-1].split("/")[-1]
     assert output_name.startswith("positions_processado-")
     assert output_name.endswith(".csv")
+
+
+def test_check_runtime_dependencies_requires_pandas_for_low_code_when_missing():
+    with patch("core.services.file_processor.importlib.util.find_spec", return_value=None):
+        err = FileProcessorService._check_runtime_dependencies("return df_input")
+    assert err is not None
+    assert "Missing runtime dependency: pandas" in err
+
+
+def test_check_runtime_dependencies_allows_advanced_without_pandas():
+    script = "import math\nprint(math.sqrt(4))\n"
+    with patch("core.services.file_processor.importlib.util.find_spec", return_value=None):
+        err = FileProcessorService._check_runtime_dependencies(script)
+    assert err is None

@@ -196,8 +196,6 @@ sb = num(${q(aliases(cfg.saldo_bruto_cols))}, 0.0)
 caixa_raw = txt(${q(aliases(cfg.caixa_cols))}).str.lower()
 caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])
 caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)
-ativo_hint = ativo_direct.str.lower()
-caixa = caixa | ativo_hint.str.contains("conta corrente|saldo em conta", na=False)
 data_ref = report_date or data_do_arquivo(arquivo)
 
 def _clean_text(v):
@@ -221,6 +219,9 @@ if ${q(cfg.ativo_mode)} == "compose":
     }).apply(lambda r: _join_non_empty([r["a"], r["b"], r["c"], r["d"]], ${q(cfg.ativo_separator || " - ")}), axis=1)
 else:
     ativo = ativo_direct
+
+ativo_hint = ativo.astype(str).str.lower()
+caixa = caixa | ativo_hint.str.contains("conta corrente|saldo em conta", na=False)
 
 out = pd.DataFrame({
     "Data": data_ref,

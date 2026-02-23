@@ -128,6 +128,22 @@ class FileProcessorService:
                 "ativo_hint = ativo_direct.str.lower()\n"
                 'caixa = caixa | ativo_hint.str.contains("conta corrente|saldo em conta", na=False)',
             )
+        old_ativo_hint_block = (
+            "ativo_hint = ativo_direct.str.lower()\n"
+            'caixa = caixa | ativo_hint.str.contains("conta corrente|saldo em conta", na=False)\n'
+        )
+        if old_ativo_hint_block in s:
+            s = s.replace(old_ativo_hint_block, "")
+        new_ativo_hint_block = (
+            "ativo_hint = ativo.astype(str).str.lower()\n"
+            'caixa = caixa | ativo_hint.str.contains("conta corrente|saldo em conta", na=False)\n\n'
+        )
+        if (
+            'caixa = caixa | caixa_raw.str.contains("caixa|conta corrente|saldo em conta", na=False)' in s
+            and "ativo_hint = ativo.astype(str).str.lower()" not in s
+            and "out = pd.DataFrame({" in s
+        ):
+            s = s.replace("out = pd.DataFrame({", new_ativo_hint_block + "out = pd.DataFrame({")
         if '"Data": data_do_arquivo(arquivo),' in s:
             s = s.replace(
                 '"Data": data_do_arquivo(arquivo),',

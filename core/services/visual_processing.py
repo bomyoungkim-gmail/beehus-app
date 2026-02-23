@@ -122,11 +122,26 @@ def num(candidates, default=0.0):
     col = pick_col(candidates)
     if col:
         raw = df[col]
-        parsed = pd.to_numeric(raw, errors="coerce")
-        if parsed.notna().any():
-            return parsed.fillna(default)
-        # Fallback para formato pt-BR (1.234,56)
-        return raw.apply(ptbr_to_float).fillna(default)
+        def parse_num(v):
+            s = str(v).strip()
+            if s.lower() in ["", "-", "nan", "none", "null"]:
+                return None
+            s = s.replace("\u00a0", "").replace(" ", "")
+            # pt-BR com decimal em virgula
+            if "," in s:
+                return ptbr_to_float(s)
+            # "823.318" => milhar (pt-BR), nao decimal com ponto
+            if re.fullmatch(r"^\\d{{1,3}}(?:\\.\\d{{3}})+$", s):
+                try:
+                    return float(s.replace(".", ""))
+                except Exception:
+                    return None
+            # fallback formato en-US
+            try:
+                return float(s)
+            except Exception:
+                return None
+        return raw.apply(parse_num).fillna(default)
     return pd.Series([default] * len(df), index=df.index)
 
 def _clean_text(v):

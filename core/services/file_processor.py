@@ -79,15 +79,39 @@ class FileProcessorService:
         improved_block = "\n".join(
             [
                 "        raw = df[col]",
+                "        def parse_num(v):",
+                "            s = str(v).strip()",
+                "            if s.lower() in ['', '-', 'nan', 'none', 'null']:",
+                "                return None",
+                "            s = s.replace('\\u00a0', '').replace(' ', '')",
+                "            if ',' in s:",
+                "                return ptbr_to_float(s)",
+                "            if re.fullmatch(r'^\\d{1,3}(?:\\.\\d{3})+$', s):",
+                "                try:",
+                "                    return float(s.replace('.', ''))",
+                "                except Exception:",
+                "                    return None",
+                "            try:",
+                "                return float(s)",
+                "            except Exception:",
+                "                return None",
+                "        return raw.apply(parse_num).fillna(default)",
+            ]
+        )
+        for pattern in legacy_line_patterns:
+            if pattern in s:
+                s = s.replace(pattern, improved_block)
+        old_improved_block = "\n".join(
+            [
+                "        raw = df[col]",
                 "        parsed = pd.to_numeric(raw, errors='coerce')",
                 "        if parsed.notna().any():",
                 "            return parsed.fillna(default)",
                 "        return raw.apply(ptbr_to_float).fillna(default)",
             ]
         )
-        for pattern in legacy_line_patterns:
-            if pattern in s:
-                s = s.replace(pattern, improved_block)
+        if old_improved_block in s:
+            s = s.replace(old_improved_block, improved_block)
         if 'caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])' in s and "conta corrente" not in s:
             s = s.replace(
                 'caixa = caixa_raw.isin(["1", "true", "sim", "s", "yes", "y"])',

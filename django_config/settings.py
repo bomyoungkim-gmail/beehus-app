@@ -21,12 +21,7 @@ DATABASES = {}
 
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv('RABBITMQ_URL', 'amqp://guest:guest@rabbitmq:5672/')
-CELERY_RESULT_BACKEND = 'mongodb'
-CELERY_MONGODB_BACKEND_SETTINGS = {
-    'host': os.getenv('MONGO_URI', 'mongodb://admin:adminpass@mongo:27017'),
-    'database': 'celery_results',
-    'taskmeta_collection': 'celery_taskmeta',
-}
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
 
 CELERY_TIMEZONE = 'America/Sao_Paulo'
 CELERY_TASK_TRACK_STARTED = True

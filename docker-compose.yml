@@ -89,7 +89,7 @@ services:
   chrome-node-1:
     <<: *chrome-node
     ports:
-      - "7902:7900"
+      - "17902:7900"
     environment:
       <<: *chrome-node-env
       SE_NODE_HOST: chrome-node-1
@@ -98,7 +98,7 @@ services:
   chrome-node-2:
     <<: *chrome-node
     ports:
-      - "7903:7900"
+      - "17903:7900"
     environment:
       <<: *chrome-node-env
       SE_NODE_HOST: chrome-node-2
@@ -110,11 +110,11 @@ services:
       context: .
       dockerfile: docker/Dockerfile.worker
     # Reduced concurrency to 1 for memory optimization (jobs are I/O bound)
-    command: celery -A core.celery_app worker --concurrency=1 --loglevel=info
+    command: bash scripts/start_worker_vnc.sh
     restart: unless-stopped
     ports:
       - "5901:5900"
-      - "7901:6901" # Host 7901 -> Worker NoVNC 6901 (JP Morgan Specific)
+      - "17901:6901" # Host 17901 -> Worker NoVNC 6901 (nginx proxies 7901->17901)
     shm_size: 2g
     volumes:
       - .:/app

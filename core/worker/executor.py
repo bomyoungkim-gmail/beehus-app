@@ -1,7 +1,9 @@
 import logging
 import os
 import re
+import subprocess
 import time
+import tempfile
 
 import requests
 from selenium import webdriver
@@ -68,8 +70,11 @@ class SeleniumExecutor:
             logger.info("🔌 Initializing Driver (LOCAL Mode for Evasion)...")
             try:
                 os.environ["DISPLAY"] = os.environ.get("DISPLAY", ":99")
+                if not os.environ.get("XAUTHORITY") and os.path.exists("/tmp/.Xauthority"):
+                    os.environ["XAUTHORITY"] = "/tmp/.Xauthority"
                 import undetected_chromedriver as uc
                 logger.info("⚡ Attempting to start Local Undetected Chrome...")
+                chrome_major = self._detect_local_chrome_major()
                 
                 uc_options = uc.ChromeOptions()
                 for arg in chrome_options.arguments:
@@ -82,15 +87,36 @@ class SeleniumExecutor:
                 uc_options.add_argument("--window-size=1920,1080")
                 uc_options.add_argument("--window-position=0,0")
                 uc_options.add_argument("--disable-gpu")
+                uc_options.add_argument("--disable-setuid-sandbox")
+                uc_options.add_argument("--ozone-platform=x11")
                 uc_options.add_argument("--no-first-run")
                 uc_options.add_argument("--no-default-browser-check")
-                
-                self.driver = uc.Chrome(
-                    options=uc_options,
-                    version_main=None,
-                    headless=False,
-                    use_subprocess=True,
-                )
+                # Isolate Chrome profile per run to avoid stale locks/crashes.
+                uc_options.add_argument(f"--user-data-dir={tempfile.mkdtemp(prefix='uc-profile-')}")
+
+                # Keep Chromedriver major aligned with the installed Chrome major.
+                # Without this, UC may pick a newer driver and fail session creation.
+                driver_kwargs = {
+                    "options": uc_options,
+                    "version_main": chrome_major,
+                    "headless": False,
+                    "use_subprocess": True,
+                }
+                try:
+                    self.driver = uc.Chrome(**driver_kwargs)
+                except Exception as first_error:
+                    resolved_major = self._extract_chrome_major_from_error(str(first_error))
+                    if resolved_major and resolved_major != chrome_major:
+                        logger.warning(
+                            "Local UC failed with major=%s; retrying with detected error major=%s",
+                            chrome_major,
+                            resolved_major,
+                        )
+                        driver_kwargs["version_main"] = resolved_major
+                        self.driver = uc.Chrome(**driver_kwargs)
+                    else:
+                        raise
+
                 self._enable_auto_download()
                 logger.info(f"✅ Created Local UC driver session: {self.driver.session_id}")
                 self.node_id = "LOCAL_WORKER_CONTAINER"
@@ -146,6 +172,48 @@ class SeleniumExecutor:
             )
         else:
             logger.warning("Could not set CDP download behavior with available driver APIs")
+
+    def _detect_local_chrome_major(self) -> int | None:
+        """Detect installed Chrome major version inside the worker container."""
+        candidates = [
+            ["google-chrome", "--version"],
+            ["google-chrome-stable", "--version"],
+            ["chromium", "--version"],
+            ["chromium-browser", "--version"],
+        ]
+        for cmd in candidates:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                output = f"{result.stdout} {result.stderr}".strip()
+                match = re.search(r"(\d+)\.\d+\.\d+\.\d+", output)
+                if match:
+                    major = int(match.group(1))
+                    logger.info("Detected local Chrome major version: %s (%s)", major, " ".join(cmd))
+                    return major
+            except Exception as e:
+                logger.debug("Failed to detect Chrome version via %s: %s", cmd, e)
+        logger.warning("Could not detect local Chrome major version; letting UC auto-resolve")
+        return None
+
+    def _extract_chrome_major_from_error(self, error_text: str) -> int | None:
+        """
+        Parse Chrome major from chromedriver mismatch errors like:
+        'Current browser version is 145.0.x.x'
+        """
+        match = re.search(r"Current browser version is (\d+)\.", error_text or "")
+        if not match:
+            return None
+        try:
+            return int(match.group(1))
+        except Exception:
+            return None
 
     def _execute_cdp_command(self, cmd: str, params: dict) -> bool:
         """Execute CDP command across local and remote driver implementations."""

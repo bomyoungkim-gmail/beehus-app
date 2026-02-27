@@ -317,9 +317,9 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 return {"success": False, "error": str(e)}
             
             # Execute scraping with Selenium
-            # HYBRID ARCHITECTURE: 
-            # - If JP Morgan: Use Local Undetected Chrome (Port 7901)
-            # - Else, Use Remote Selenium Grid (Port 7900)
+            # HYBRID ARCHITECTURE:
+            # - If JP Morgan: use local worker NoVNC endpoint (host port 17901 by default)
+            # - Else: use remote Selenium Grid nodes (host ports 17902/17903 by default)
             use_local = "jpmorgan" in connector_name.lower()
             
             slot_token = None

@@ -3,6 +3,23 @@ set -e
 
 mkdir -p /app/artifacts
 
+# Fail fast when worker image is stale and missing processing deps.
+python - <<'PY'
+import importlib.util
+import sys
+
+required = ("pandas", "openpyxl", "xlrd")
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+if missing:
+    print(
+        "Missing runtime dependencies in worker image: "
+        + ", ".join(missing)
+        + ". Rebuild celery-worker image and redeploy.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+
 # Start Xvfb
 echo "Starting Xvfb on :99..."
 export DISPLAY=:99

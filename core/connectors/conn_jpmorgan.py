@@ -147,6 +147,8 @@ class JPMorganConnector(BaseConnector):
             # Initial Date Calculation
             holdings_date = None
             history_date = None
+            start_date = None
+            end_date = None
 
             if export_holdings:
                  holdings_date = calculate_holdings_date(params, output_format="%m/%d/%Y")
@@ -178,6 +180,7 @@ class JPMorganConnector(BaseConnector):
             # Export History
             if export_history and history_date:
                 await actions.export_history(history_date, start_date=start_date, end_date=end_date)
+                await log(f"OK History exported for range: {start_date} - {end_date}")
             if run:
                 update_data = {}
                 holdings_date = locals().get("holdings_date")
@@ -191,7 +194,6 @@ class JPMorganConnector(BaseConnector):
                 
                 if update_data:
                     await run.update({"$set": update_data})
-                await log(f"OK History exported for range: {start_date} - {end_date}")
 
 
 

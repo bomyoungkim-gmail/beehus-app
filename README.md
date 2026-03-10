@@ -94,7 +94,8 @@ Below is a breakdown of each container and its role in the platform:
 | Variable            | Description                                                | Default                 |
 | :------------------ | :--------------------------------------------------------- | :---------------------- |
 | `VITE_API_URL`      | URL of the Backend API (accessible from browser)           | `http://localhost:8000` |
-| `VITE_VNC_URL`      | URL of the Selenium VNC Server (accessible from browser)   | `http://localhost:7900` |
+| `VITE_VNC_URL_BASE` | Base URL used to build Selenium/worker VNC endpoints       | `http://localhost`      |
+| `VITE_VNC_HOST_PORT_BASE` | Base public host port for VNC mapping                | `17901`                 |
 | `VITE_VNC_PASSWORD` | Password for VNC connection (must match `SE_VNC_PASSWORD`) | `secret`                |
 
 ### Backend (`config/env/.env`)

@@ -18,6 +18,7 @@ function normalizeRunVncUrl(rawUrl: string | null | undefined, hostPortBase: num
     const parsed = new URL(rawUrl);
     const pageProtocol = window.location.protocol;
     const pageHost = window.location.hostname;
+    const isLocalPage = pageHost === "localhost" || pageHost === "127.0.0.1";
 
     // Backend may publish localhost URLs from inside containers.
     if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
@@ -31,7 +32,7 @@ function normalizeRunVncUrl(rawUrl: string | null | undefined, hostPortBase: num
 
     // Local Docker maps VNC ports to 1790x; backend may still publish 790x.
     const currentPort = Number(parsed.port || "0");
-    if ((pageHost === "localhost" || pageHost === "127.0.0.1") && currentPort >= 7901 && currentPort <= 7909) {
+    if (isLocalPage && currentPort >= 7901 && currentPort <= 7909) {
       const offset = currentPort - 7901;
       parsed.port = String(hostPortBase + offset);
     }
@@ -153,7 +154,22 @@ export default function LiveView() {
     ? `${normalizedRunVncBase}/?autoconnect=true&resize=scale&path=websockify&password=${vncPassword}`
     : null;
   const vncUrl = runVncUrl || fallbackVncUrl;
-  const fullVncUrl = import.meta.env.VITE_VNC_URL || vncUrl || undefined;
+  const explicitVncUrl = import.meta.env.VITE_VNC_URL || undefined;
+  const fullVncUrl = (() => {
+    const normalizedExplicit = normalizeRunVncUrl(explicitVncUrl, hostPortBase);
+    // If explicit env points only to the root site (443), prefer the computed VNC URL.
+    if (normalizedExplicit) {
+      try {
+        const explicitPort = Number(new URL(normalizedExplicit).port || (window.location.protocol === 'https:' ? '443' : '80'));
+        if (explicitPort !== 443 && explicitPort !== 80) {
+          return normalizedExplicit;
+        }
+      } catch {
+        // Ignore invalid override and fall back to computed VNC URL.
+      }
+    }
+    return vncUrl || normalizedExplicit || undefined;
+  })();
 
   const vncPort = (() => {
     try {

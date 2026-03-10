@@ -56,7 +56,14 @@ cd /opt/beehus-app
 
 ## 5. Configurar `config/env/.env` de producao
 
-Crie/edite `/opt/beehus-app/config/env/.env`:
+Use o arquivo padrao e depois ajuste os segredos:
+
+```bash
+cd /opt/beehus-app
+cp config/env/.env.production.example config/env/.env
+```
+
+Edite `/opt/beehus-app/config/env/.env`:
 
 ```env
 MONGO_URI=mongodb://admin:adminpass@mongo:27017
@@ -86,15 +93,17 @@ SMTP_USE_TLS=true
 
 ## 6. Build do frontend para producao
 
-Como o frontend e estatico, `VITE_API_URL` precisa estar correto no build.
+Como o frontend e estatico, as variaveis `VITE_*` precisam estar corretas no build.
 
 ```bash
 cd /opt/beehus-app/beehus-web
-echo "VITE_API_URL=https://app.seudominio.com/api" > .env.production
+cp .env.production.example .env.production
 npm ci
 npm run build
 cd /opt/beehus-app
 ```
+
+Se precisar customizar dominio/portas, edite `beehus-web/.env.production` antes do `npm run build`.
 
 ## 7. Subir containers em producao
 
@@ -188,6 +197,25 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 docker compose logs -f app-console celery-worker frontend
 ```
 
+### Rebuild rapido do frontend (quando mudar apenas Vite/React)
+
+```bash
+cd /opt/beehus-app/beehus-web
+cp .env.production.example .env.production
+npm ci
+npm run build
+
+cd /opt/beehus-app
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d frontend
+```
+
+Se o container `frontend` ja estiver em execucao, isso normalmente basta porque ele monta `./beehus-web/dist` em volume.
+Se quiser forcar a reciclagem do container:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml restart frontend
+```
+
 ## 13. Problemas comuns
 
 - Convite cria usuario mas nao envia email:
@@ -196,5 +224,7 @@ docker compose logs -f app-console celery-worker frontend
   - `FRONTEND_URL` incorreto em `config/env/.env`
 - Frontend nao chama API em producao:
   - `VITE_API_URL` errado no build do frontend
+- VNC abre dominio principal ou fica em timeout:
+  - `VITE_VNC_URL` fixo/sem porta no build; use `VITE_VNC_URL_BASE` + `VITE_VNC_HOST_PORT_BASE=7901`
 - Erro CORS no browser:
   - dominio de producao ausente em `allow_origins`

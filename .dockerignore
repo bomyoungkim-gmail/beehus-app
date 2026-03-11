@@ -82,5 +82,7 @@ screenshots/
 
 # Testing
 .pytest_cache/
+.pytest_tmp/
+.tmp/
 coverage/
 *.cover

@@ -19,6 +19,7 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const UserProfile = lazy(() => import("./pages/UserProfile"));
 const Downloads = lazy(() => import("./pages/Downloads"));
+const ConferenciaAtivo = lazy(() => import("./pages/ConferenciaAtivo"));
 
 function App() {
   return (
@@ -116,6 +117,15 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Downloads />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/conferencia-ativo"
+                element={
+                  <ProtectedRoute>
+                    <ConferenciaAtivo />
                   </ProtectedRoute>
                 }
               />

@@ -332,7 +332,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     heartbeat_task.cancel()
                     return {"success": False, "error": msg}
 
-            download_root = os.getenv("DOWNLOADS_DIR", "/downloads")
+            download_root = "/downloads"
             run_download_dir = os.path.join(download_root, run_id)
             os.makedirs(run_download_dir, exist_ok=True)
             try:

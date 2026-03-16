@@ -33,6 +33,7 @@ ai/
 
 # Artifacts
 artifacts/
+downloads/
 
 # EC2 backups
 .env.backup*

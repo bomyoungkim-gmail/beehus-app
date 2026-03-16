@@ -4,7 +4,7 @@
 name: beehus-app
 
 x-app-env-file: &app-env-file
-  - ./config/env/.env
+  - ./.env
 
 x-chrome-node-env: &chrome-node-env
   SE_EVENT_BUS_HOST: selenium-hub

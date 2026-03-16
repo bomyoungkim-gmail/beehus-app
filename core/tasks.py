@@ -442,8 +442,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                         default_date_ddmmyyyy = report_date_ddmmyyyy or history_date_ddmmyyyy or datetime.now().strftime("%d%m%Y")
 
                         files_metadata = []
-                        for idx, original_path in enumerate(original_paths, start=1):
-                            suffix = str(idx) if len(original_paths) > 1 else ""
+                        for original_path in original_paths:
                             current_name = os.path.basename(original_path)
                             if _is_history_file(current_name):
                                 selected_date = history_date_ddmmyyyy or default_date_ddmmyyyy
@@ -454,7 +453,6 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                                 FileManager.append_date_suffix(
                                     original_path,
                                     selected_date,
-                                    suffix=suffix,
                                 )
                                 or original_path
                             )

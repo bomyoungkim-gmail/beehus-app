@@ -20,6 +20,10 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+.pytest_tmp/
+.pytest_tmp_old/
+.pytest_tmp*
+.pytest_cache_local/
 
 # Virtual environments
 venv/

@@ -54,16 +54,16 @@ sudo chown -R $USER:$USER /opt/beehus-app
 cd /opt/beehus-app
 ```
 
-## 5. Configurar `config/env/.env` de producao
+## 5. Configurar `.env` de producao
 
 Use o arquivo padrao e depois ajuste os segredos:
 
 ```bash
 cd /opt/beehus-app
-cp config/env/.env.production.example config/env/.env
+cp .env.production.example .env
 ```
 
-Edite `/opt/beehus-app/config/env/.env`:
+Edite `/opt/beehus-app/.env`:
 
 ```env
 MONGO_URI=mongodb://admin:adminpass@mongo:27017
@@ -96,14 +96,15 @@ SMTP_USE_TLS=true
 Como o frontend e estatico, as variaveis `VITE_*` precisam estar corretas no build.
 
 ```bash
-cd /opt/beehus-app/beehus-web
-cp .env.production.example .env.production
+cd /opt/beehus-app
+cp .env.frontend.production.example .env.production
+cd beehus-web
 npm ci
 npm run build
 cd /opt/beehus-app
 ```
 
-Se precisar customizar dominio/portas, edite `beehus-web/.env.production` antes do `npm run build`.
+Se precisar customizar dominio/portas, edite `.env.production` na raiz antes do `npm run build`.
 
 ## 7. Subir containers em producao
 
@@ -200,12 +201,13 @@ docker compose logs -f app-console celery-worker frontend
 ### Rebuild rapido do frontend (quando mudar apenas Vite/React)
 
 ```bash
-cd /opt/beehus-app/beehus-web
-cp .env.production.example .env.production
+cd /opt/beehus-app
+cp .env.frontend.production.example .env.production
+cd beehus-web
 npm ci
 npm run build
-
 cd /opt/beehus-app
+
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d frontend
 ```
 
@@ -221,7 +223,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml restart frontend
 - Convite cria usuario mas nao envia email:
   - SMTP nao configurado ou bloqueado
 - Link de convite abre localhost:
-  - `FRONTEND_URL` incorreto em `config/env/.env`
+  - `FRONTEND_URL` incorreto em `.env`
 - Frontend nao chama API em producao:
   - `VITE_API_URL` errado no build do frontend
 - VNC abre dominio principal ou fica em timeout:

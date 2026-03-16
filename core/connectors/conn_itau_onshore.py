@@ -325,11 +325,17 @@ class ItauOnshoreConnector(BaseConnector):
                 await log(f"INFO History date: {history_date}")
                 # For Itau, history needs start and end dates (same date for single day)
                 await actions.open_menu()
-                await actions.navigate_to_conta_corrente()
-                await actions.open_extrato()
-                await actions.set_extrato_date_range(history_date, history_date)
-                await actions.apply_extrato_filter()
-                await actions.export_history()
+                conta_corrente_ok = await actions.navigate_to_conta_corrente()
+                if conta_corrente_ok:
+                    await actions.open_extrato()
+                    await actions.set_extrato_date_range(history_date, history_date)
+                    await actions.apply_extrato_filter()
+                    await actions.export_history()
+                else:
+                    await log("WARN 'conta corrente' indisponivel. Pulando fluxo padrao de historico.")
+                    fallback_ok = await actions.export_history_fallback_pix_pdf()
+                    if not fallback_ok:
+                        await log("WARN Fallback de historico (Pix/PDF) nao concluiu com sucesso.")
 
 
             # Save dates to run

@@ -11,9 +11,8 @@
 ```bash
 cd ~/beehus-app
 
-# Garantir env file no lugar certo
-mkdir -p config/env
-cp .env config/env/.env
+# Garantir env file na raiz
+cp .env.example .env
 
 # Subir todos os serviços
 sudo docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
@@ -178,4 +177,3 @@ Usuário → https://beehus.placestecnologia.com.br:7901  (SSL) → nginx → 17
 Usuário → https://beehus.placestecnologia.com.br:7902  (SSL) → nginx → 17902 → chrome-node-1 NoVNC
 Usuário → https://beehus.placestecnologia.com.br:7903  (SSL) → nginx → 17903 → chrome-node-2 NoVNC
 ```
-

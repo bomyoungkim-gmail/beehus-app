@@ -5,7 +5,9 @@ Encapsula toda a lógica de interação com o portal em métodos reutilizáveis.
 
 import asyncio
 from typing import Callable
+from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support.ui import Select
 from core.connectors.helpers.selenium_helpers import SeleniumHelpers
 from core.connectors.seletores.itau_onshore import SeletorItauOnshore
 from core.connectors.utils.digital_keyboard_utils import build_digit_to_button_map
@@ -53,6 +55,66 @@ class ItauOnshoreActions:
             pass
 
         return False
+
+    def _find_in_default_or_iframes(self, locator, timeout: int = 20):
+        """
+        Find element in current/other windows and nested iframe/frame trees.
+        Keeps driver in the exact context where element was found.
+        """
+        by, value = locator
+
+        def _try_find_visible_here():
+            for el in self.driver.find_elements(by, value):
+                if el.is_displayed():
+                    return el
+            return None
+
+        def _search_frames_recursive(depth: int = 0):
+            if depth > 6:
+                return None
+
+            found = _try_find_visible_here()
+            if found:
+                return found
+
+            frames = self.driver.find_elements(By.CSS_SELECTOR, "iframe,frame")
+            for frame in frames:
+                try:
+                    self.driver.switch_to.frame(frame)
+                except Exception:
+                    continue
+                try:
+                    nested = _search_frames_recursive(depth + 1)
+                    if nested:
+                        return nested
+                except Exception:
+                    pass
+                try:
+                    self.driver.switch_to.parent_frame()
+                except Exception:
+                    self.driver.switch_to.default_content()
+            return None
+
+        import time
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            for handle in self.driver.window_handles:
+                try:
+                    self.driver.switch_to.window(handle)
+                    self.driver.switch_to.default_content()
+                except Exception:
+                    continue
+                found = _search_frames_recursive(0)
+                if found:
+                    return found
+            # small polling interval for dynamic page/frame load
+            time.sleep(0.4)
+
+        try:
+            self.driver.switch_to.default_content()
+        except Exception:
+            pass
+        return None
     
     # ========== NAVEGAÇÃO ==========
     
@@ -163,11 +225,29 @@ class ItauOnshoreActions:
 
         await self.log("OK Posição Diária carregada")
     
-    async def navigate_to_conta_corrente(self) -> None:
+    async def navigate_to_conta_corrente(self) -> bool:
         """Navega para a pagina de Conta Corrente."""
         await self.log("Navegando para Conta Corrente...")
-        self._click_with_fallback(self.sel.CONTA_CORRENTE)
-        await self.log("OK Conta Corrente carregada")
+        clicked = self._click_with_fallback(self.sel.CONTA_CORRENTE)
+        if not clicked:
+            await self.log("WARN Link 'conta corrente' nao encontrado")
+            return False
+
+        # Evita falso positivo: só confirma sucesso se algum elemento de Extrato ficar visível
+        # após o clique em conta corrente.
+        try:
+            self.helpers.wait_until(
+                lambda d: any(
+                    el.is_displayed()
+                    for el in self.driver.find_elements(*self.sel.EXTRATO)
+                ),
+                timeout=8,
+            )
+            await self.log("OK Conta Corrente carregada")
+            return True
+        except Exception:
+            await self.log("WARN Clique em 'conta corrente' nao abriu area de extrato")
+            return False
 
     async def open_extrato(self) -> None:
         """Abre a pagina de Extrato."""
@@ -220,6 +300,108 @@ class ItauOnshoreActions:
         await self.log("OK Exportacao do extrato iniciada")
         await self.log("Aguardando 15s para download...")
         await asyncio.sleep(15)
+
+    async def export_history_fallback_pix_pdf(self) -> bool:
+        """
+        Fallback para histórico quando o link 'conta corrente' não estiver disponível.
+        Fluxo:
+        ver mais -> extrato -> dropdown produto -> continuar -> extrato pix -> salvar em pdf.
+        """
+        await self.log("INFO Iniciando fallback de historico (Pix/PDF)...")
+
+        if not self._click_with_fallback(self.sel.VER_MAIS):
+            await self.log("WARN Fallback: nao encontrou 'ver mais'")
+            return False
+        await self.log("OK Fallback: clicou em 'ver mais'")
+
+        if not self._click_with_fallback(self.sel.EXTRATO_FALLBACK):
+            await self.log("WARN Fallback: nao encontrou link 'extrato'")
+            return False
+        await self.log("OK Fallback: clicou em 'extrato'")
+
+        try:
+            # Alguns fluxos antigos do Itau abrem nova janela ao entrar no extrato.
+            try:
+                handles = self.driver.window_handles
+                if len(handles) > 1:
+                    self.driver.switch_to.window(handles[-1])
+                    await self.log("INFO Fallback: alternou para nova janela de extrato")
+            except Exception:
+                pass
+
+            # Aguarda renderizar pagina de extrato fallback.
+            await asyncio.sleep(1.5)
+            dropdown = self._find_in_default_or_iframes(self.sel.PRODUTO_DROPDOWN, timeout=20)
+            if dropdown is None:
+                await self.log("WARN Fallback: dropdown de produto nao encontrado")
+                return False
+
+            self.helpers.wait_until(lambda d: dropdown.is_displayed() and dropdown.is_enabled(), timeout=8)
+            select = Select(dropdown)
+
+            selected = ""
+            try:
+                select.select_by_value("id:10417")
+                selected = "id:10417"
+            except Exception:
+                try:
+                    select.select_by_visible_text("Previdência")
+                    selected = "Previdência"
+                except Exception:
+                    try:
+                        select.select_by_value("id:10416")
+                        selected = "id:10416"
+                    except Exception:
+                        # JS fallback by value/text contains
+                        selected = self.driver.execute_script(
+                            """
+                            const s = arguments[0];
+                            if (!s) return '';
+                            const opts = Array.from(s.options || []);
+                            let opt = opts.find(o => (o.value || '').trim() === 'id:10417');
+                            if (!opt) opt = opts.find(o => (o.textContent || '').toLowerCase().includes('previd'));
+                            if (!opt) opt = opts.find(o => (o.value || '').trim() === 'id:10416');
+                            if (!opt) opt = opts.find(o => (o.textContent || '').toLowerCase().includes('poup'));
+                            if (!opt) return '';
+                            s.value = opt.value;
+                            s.dispatchEvent(new Event('change', { bubbles: true }));
+                            return opt.value || (opt.textContent || '').trim();
+                            """,
+                            dropdown,
+                        ) or ""
+
+            if not selected:
+                await self.log("WARN Fallback: nao conseguiu selecionar Poupança/Previdência no dropdown")
+                return False
+
+            # Garante onchange para páginas antigas.
+            self.driver.execute_script(
+                "arguments[0].dispatchEvent(new Event('change', { bubbles: true }));",
+                dropdown,
+            )
+            await self.log(f"OK Fallback: produto selecionado no dropdown ({selected})")
+        except Exception as e:
+            await self.log(f"WARN Fallback: falha ao selecionar produto no dropdown: {e}")
+            return False
+
+        if not self._click_with_fallback(self.sel.CONTINUAR):
+            await self.log("WARN Fallback: nao encontrou botao 'Continuar'")
+            return False
+        await self.log("OK Fallback: clicou em 'Continuar'")
+
+        if not self._click_with_fallback(self.sel.EXTRATO_PIX):
+            await self.log("WARN Fallback: nao encontrou botao 'Extrato Pix'")
+            return False
+        await self.log("OK Fallback: clicou em 'Extrato Pix'")
+
+        if not self._click_with_fallback(self.sel.SALVAR_PDF):
+            await self.log("WARN Fallback: nao encontrou botao 'salvar em pdf'")
+            return False
+
+        await self.log("OK Fallback: clicou em 'salvar em pdf'")
+        await self.log("Aguardando 15s para download PDF...")
+        await asyncio.sleep(15)
+        return True
 
     # ========== RELATÓRIOS ==========
     

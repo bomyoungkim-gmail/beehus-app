@@ -36,6 +36,11 @@ function normalizeRunVncUrl(rawUrl: string | null | undefined, hostPortBase: num
       const offset = currentPort - 7901;
       parsed.port = String(hostPortBase + offset);
     }
+    // Production commonly exposes VNC on 790x via nginx, while backend/container may report 1790x.
+    if (!isLocalPage && currentPort >= 17901 && currentPort <= 17909) {
+      const offset = currentPort - 17901;
+      parsed.port = String(hostPortBase + offset);
+    }
 
     return parsed.toString().replace(/\/$/, "");
   } catch {
@@ -135,13 +140,25 @@ export default function LiveView() {
   );
 
   const isLocalEvasion = run?.connector?.includes('jpmorgan');
-  const baseUrl = import.meta.env.VITE_VNC_URL_BASE || window.location.origin;
+  const envVncBase = import.meta.env.VITE_VNC_URL_BASE || "";
+  const pageHost = window.location.hostname;
+  const isLocalPage = pageHost === "localhost" || pageHost === "127.0.0.1";
+  const envLooksLocalhost = /localhost|127\.0\.0\.1/i.test(envVncBase);
+  const baseUrl = !isLocalPage && envLooksLocalhost
+    ? window.location.origin
+    : (envVncBase || window.location.origin);
   const defaultHostPortBase =
     window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
       ? 17901
       : 7901;
   const parsedHostPortBase = Number(import.meta.env.VITE_VNC_HOST_PORT_BASE || defaultHostPortBase);
-  const hostPortBase = Number.isFinite(parsedHostPortBase) ? parsedHostPortBase : defaultHostPortBase;
+  const hostPortBase = (() => {
+    const candidate = Number.isFinite(parsedHostPortBase) ? parsedHostPortBase : defaultHostPortBase;
+    if (!isLocalPage && candidate >= 17901 && candidate <= 17909) {
+      return 7901 + (candidate - 17901);
+    }
+    return candidate;
+  })();
   const vncPassword = import.meta.env.VITE_VNC_PASSWORD || 'secret';
 
   const fallbackVncPort = isLocalEvasion ? hostPortBase : null; // Local worker only

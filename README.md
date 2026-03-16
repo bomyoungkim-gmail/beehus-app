@@ -14,9 +14,9 @@
 1. Clone the repository
 2. Create your centralized env file:
    ```bash
-   cp config/env/.env.example config/env/.env
+   cp .env.example .env
    ```
-3. Edit `config/env/.env` with your environment values.
+3. Edit `.env` with your environment values.
 4. Run with Docker Compose:
    ```bash
    docker compose up --build -d
@@ -89,7 +89,7 @@ Below is a breakdown of each container and its role in the platform:
 
 ### 🔐 Environment Variables
 
-### Frontend (`config/env/.env` or Docker env)
+### Frontend (`.env` or Docker env)
 
 | Variable            | Description                                                | Default                 |
 | :------------------ | :--------------------------------------------------------- | :---------------------- |
@@ -98,7 +98,7 @@ Below is a breakdown of each container and its role in the platform:
 | `VITE_VNC_HOST_PORT_BASE` | Base public host port for VNC mapping                | `17901`                 |
 | `VITE_VNC_PASSWORD` | Password for VNC connection (must match `SE_VNC_PASSWORD`) | `secret`                |
 
-### Backend (`config/env/.env`)
+### Backend (`.env`)
 
 | Variable              | Description                                 | Default                       |
 | :-------------------- | :------------------------------------------ | :---------------------------- |

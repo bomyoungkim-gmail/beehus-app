@@ -29,6 +29,24 @@ class SeletorItauOnshore:
     POSICAO_DIARIA = (By.XPATH, "//a[contains(@data-op,'pf-posicao-diaria-investimentos')]")
     CONTA_CORRENTE = (By.XPATH, "//a[normalize-space()='conta corrente']")
     EXTRATO = (By.XPATH, "//a[contains(@aria-label,'extrato') or normalize-space()='extrato']")
+    VER_MAIS = (By.XPATH, "//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'ver mais')]")
+    EXTRATO_FALLBACK = (
+        By.XPATH,
+        "//a[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'extrato') "
+        "or contains(translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'extrato')]",
+    )
+    PRODUTO_DROPDOWN = (By.CSS_SELECTOR, "select[name='cboProduto']")
+    PRODUTO_PREVIDENCIA_OPTION = (By.CSS_SELECTOR, "select[name='cboProduto'] option[value='id:10417']")
+    PRODUTO_POUPANCA_OPTION = (By.CSS_SELECTOR, "select[name='cboProduto'] option[value='id:10416']")
+    CONTINUAR = (By.XPATH, "//a[contains(@href,'pegaRadio') or .//img[contains(@alt,'Continuar')]]")
+    EXTRATO_PIX = (
+        By.XPATH,
+        "//button[.//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'extrato pix')]]",
+    )
+    SALVAR_PDF = (
+        By.XPATH,
+        "//button[.//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'salvar em pdf')]]",
+    )
     
     # === REPORTS - Relatórios ===
     MEUS_INVESTIMENTOS_TAB = (By.XPATH,

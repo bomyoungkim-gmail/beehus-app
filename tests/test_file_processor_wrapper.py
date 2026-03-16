@@ -24,7 +24,7 @@ def test_build_wrapped_script_low_code_mode_includes_auto_wrapper():
     assert "def process_auto_generated(arquivo, aba, carteira, df_input):" in wrapped
     assert "df_input = _load_input_dataframe(arquivo, aba)" in wrapped
     assert "resultado = process_auto_generated(arquivo, aba, carteira, df_input)" in wrapped
-    assert "resultado.to_csv(caminho_saida, index=False, sep=';', decimal=',')" in wrapped
+    assert "resultado.to_csv(caminho_saida, index=False, sep=';', decimal=',', encoding='utf-8-sig')" in wrapped
     assert "# Aliases em portugues" in wrapped
     assert "arquivo = selected_filename" in wrapped
 

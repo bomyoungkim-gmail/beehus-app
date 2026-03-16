@@ -1013,7 +1013,7 @@ class FileProcessorService:
                 "            base_name = Path(arquivo).stem if arquivo else 'output'",
                 "            nome_saida = f'processed_{base_name}.csv'",
                 "            caminho_saida = Path(processed_dir) / nome_saida",
-                "            resultado.to_csv(caminho_saida, index=False, sep=';', decimal=',')",
+                "            resultado.to_csv(caminho_saida, index=False, sep=';', decimal=',', encoding='utf-8-sig')",
                 "            print(f'Auto-saved: {caminho_saida}')",
                 "    except Exception as e:",
                 "        print(f'Error in auto-generated script: {e}', file=sys.stderr)",

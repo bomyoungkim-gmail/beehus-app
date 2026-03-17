@@ -385,6 +385,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     await run.update({"$set": {"vnc_url": executor.vnc_url}})
             
             result_payload = None
+            no_files_downloaded = False
             try:
                 # Add context to params
                 params_with_context = {
@@ -478,6 +479,30 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                             await run.update({"$set": {"files": files_metadata}})
                             await log(f"Files captured: {len(files_metadata)} original file(s)")
                     else:
+                        no_files_downloaded = True
+                        try:
+                            run_dir_entries = []
+                            if os.path.isdir(run_download_dir):
+                                run_dir_entries = sorted(os.listdir(run_download_dir))
+                            root_dir_entries = []
+                            if os.path.isdir(download_root):
+                                root_dir_entries = sorted(os.listdir(download_root))
+
+                            run_dir_preview = run_dir_entries[:50]
+                            root_dir_preview = root_dir_entries[:50]
+                            run_dir_suffix = " ..." if len(run_dir_entries) > 50 else ""
+                            root_dir_suffix = " ..." if len(root_dir_entries) > 50 else ""
+
+                            await log(
+                                "DEBUG download dir snapshot "
+                                f"run_dir={run_download_dir} entries={run_dir_preview}{run_dir_suffix}"
+                            )
+                            await log(
+                                "DEBUG download root snapshot "
+                                f"root_dir={download_root} entries={root_dir_preview}{root_dir_suffix}"
+                            )
+                        except Exception as debug_list_error:
+                            await log(f"DEBUG download snapshot error: {debug_list_error}")
                         await log("No files downloaded")
 
                 except Exception as file_error:
@@ -490,6 +515,28 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     if hasattr(result, "dict")
                     else {"success": result.success, "data": result.data}
                 )
+                # Guard against false-positive "success" when connector flow finishes
+                # but no downloadable artifact is produced.
+                connectors_requiring_downloads = {
+                    "jefferies_login",
+                    "jpmorgan_login",
+                    "itau_onshore_login",
+                    "btg_offshore_login",
+                }
+                if (
+                    result.success
+                    and no_files_downloaded
+                    and connector_name in connectors_requiring_downloads
+                ):
+                    no_file_msg = (
+                        "Connector flow ended without downloaded files; "
+                        "treating run as failed to avoid false success."
+                    )
+                    await repo.save_run_status(run_id, "failed", no_file_msg)
+                    await log(f"❌ {no_file_msg}")
+                    if isinstance(result_payload, dict):
+                        result_payload["success"] = False
+                        result_payload["error"] = no_file_msg
 
             finally:
                 heartbeat_task.cancel()

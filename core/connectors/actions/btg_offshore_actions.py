@@ -62,6 +62,10 @@ class BtgOffshoreActions:
             pass
         return False
 
+    def _require_click(self, locator, action_name: str) -> None:
+        if not self._click_with_fallback(locator):
+            raise RuntimeError(f"Could not click required BTG element: {action_name}")
+
     def _find_first_visible(self, locators):
         for loc in locators:
             elements = self.driver.find_elements(*loc)
@@ -336,12 +340,12 @@ class BtgOffshoreActions:
 
     async def open_start_date_input(self) -> None:
         await self.dismiss_modal_overlay("before start date input")
-        self._click_with_fallback(self.sel.DATE_INPUT)
+        self._require_click(self.sel.DATE_INPUT, "start date input")
         await self.log("OK Start date input opened")
 
     async def select_calendar_date(self, date_str: str) -> None:
         day_cell = (By.XPATH, f"//td[@title='{date_str}']")
-        self._click_with_fallback(day_cell)
+        self._require_click(day_cell, f"calendar day {date_str}")
         await self.log(f"OK Date selected: {date_str}")
 
     async def open_check_all_anchor(self) -> None:
@@ -351,33 +355,33 @@ class BtgOffshoreActions:
             await self.log("INFO Check all already open or not visible")
 
     async def open_export_options(self) -> None:
-        self._click_with_fallback(self.sel.EXPORT_OPTIONS_BTN)
+        self._require_click(self.sel.EXPORT_OPTIONS_BTN, "export options")
         await self.log("OK Export options opened")
 
     async def select_export_all(self) -> None:
-        self._click_with_fallback(self.sel.EXPORT_ALL_OPTION)
+        self._require_click(self.sel.EXPORT_ALL_OPTION, "export all option")
         await self.log("OK Export all selected")
 
     async def open_portfolio(self) -> None:
         if not self._is_visible(self.sel.SIDEBAR_PORTFOLIO):
             self._click_if_visible(self.sel.SIDEBAR_TOGGLE)
-        self._click_with_fallback(self.sel.SIDEBAR_PORTFOLIO)
+        self._require_click(self.sel.SIDEBAR_PORTFOLIO, "sidebar portfolio")
         await self.log("OK Portfolio opened")
 
     async def click_portfolio_check_all(self) -> None:
-        self._click_with_fallback(self.sel.PORTFOLIO_CHECK_ALL)
+        self._require_click(self.sel.PORTFOLIO_CHECK_ALL, "portfolio check all")
         await self.log("OK Portfolio check all selected")
 
     async def open_filters(self) -> None:
-        self._click_with_fallback(self.sel.FILTERS_BTN)
+        self._require_click(self.sel.FILTERS_BTN, "filters button")
         await self.log("OK Filters opened")
 
     async def open_time_period(self) -> None:
-        self._click_with_fallback(self.sel.TIME_PERIOD)
+        self._require_click(self.sel.TIME_PERIOD, "time period")
         await self.log("OK Time Period opened")
 
     async def select_custom_period(self) -> None:
-        self._click_with_fallback(self.sel.CUSTOM_PERIOD)
+        self._require_click(self.sel.CUSTOM_PERIOD, "custom period")
         await self.log("OK Custom period selected")
 
     async def set_custom_period_dates(self, date_str: str) -> None:
@@ -393,15 +397,15 @@ class BtgOffshoreActions:
         await self.log(f"OK Custom period dates set: {date_str}")
 
     async def click_filter(self) -> None:
-        self._click_with_fallback(self.sel.FILTER_BTN)
+        self._require_click(self.sel.FILTER_BTN, "filter apply")
         await self.log("OK Filter applied")
 
     async def click_export(self) -> None:
-        self._click_with_fallback(self.sel.EXPORT_BTN)
+        self._require_click(self.sel.EXPORT_BTN, "export button")
         await self.log("OK Export requested")
 
     async def click_download(self) -> None:
-        self._click_with_fallback(self.sel.DOWNLOAD_BTN)
+        self._require_click(self.sel.DOWNLOAD_BTN, "download button")
         await self.log("OK Download started")
 
     def _type_human(self, el, value: str) -> None:

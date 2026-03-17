@@ -24,7 +24,7 @@ x-chrome-node: &chrome-node
   depends_on:
     - selenium-hub
   volumes:
-    - ${DOWNLOADS_DIR:-./downloads}:/downloads
+    - ${HOST_DOWNLOADS_DIR:-./downloads}:/downloads
   networks:
     - scrape-net
   healthcheck:
@@ -119,7 +119,7 @@ services:
     volumes:
       - .:/app
       - ./artifacts:/app/artifacts
-      - ${DOWNLOADS_DIR:-./downloads}:/downloads
+      - ${HOST_DOWNLOADS_DIR:-./downloads}:/downloads
     env_file: *app-env-file
     depends_on:
       rabbitmq:

@@ -392,8 +392,12 @@ class JefferiesActions:
 
         self._wait_for_export_ready()
 
-        self._click_with_fallback(self.sel.DOWNLOAD_BTN)
-        self._click_with_fallback(self.sel.EXPORT_EXCEL)
+        clicked_download = self._click_with_fallback(self.sel.DOWNLOAD_BTN)
+        clicked_export = self._click_with_fallback(self.sel.EXPORT_EXCEL)
+        if not (clicked_download and clicked_export):
+            raise RuntimeError(
+                "Could not trigger Jefferies holdings export (download/excel button not clickable)."
+            )
         await self.log("OK Holdings exported")
 
     async def export_history(self, date: str = None, start_date: str = None, end_date: str = None) -> None:
@@ -417,8 +421,12 @@ class JefferiesActions:
 
         self._wait_for_export_ready()
 
-        self._click_with_fallback(self.sel.DOWNLOAD_BTN)
-        self._click_with_fallback(self.sel.EXPORT_EXCEL)
+        clicked_download = self._click_with_fallback(self.sel.DOWNLOAD_BTN)
+        clicked_export = self._click_with_fallback(self.sel.EXPORT_EXCEL)
+        if not (clicked_download and clicked_export):
+            raise RuntimeError(
+                "Could not trigger Jefferies history export (download/excel button not clickable)."
+            )
         await self.log("OK History exported")
 
     # ========== LOGOUT ==========

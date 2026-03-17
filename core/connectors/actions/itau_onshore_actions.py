@@ -298,8 +298,10 @@ class ItauOnshoreActions:
         await self.log("Exportando extrato para Excel...")
         # Aguarda o loading sumir para nao interceptar o clique
         self.helpers.wait_for_invisibility(*self.sel.EXTRATO_LOADING)
-        self._click_with_fallback(self.sel.EXTRATO_EXPORT_MENU)
-        self._click_with_fallback(self.sel.EXTRATO_EXPORT_EXCEL)
+        clicked_menu = self._click_with_fallback(self.sel.EXTRATO_EXPORT_MENU)
+        clicked_excel = self._click_with_fallback(self.sel.EXTRATO_EXPORT_EXCEL)
+        if not (clicked_menu and clicked_excel):
+            raise RuntimeError("Nao foi possivel abrir a exportacao do extrato (menu/excel indisponivel).")
 
         try:
             checks = self.driver.find_elements(*self.sel.EXTRATO_EXCEL_CHECKBOXES)
@@ -309,7 +311,9 @@ class ItauOnshoreActions:
         except Exception:
             pass
 
-        self._click_with_fallback(self.sel.EXTRATO_EXCEL_SAVE)
+        clicked_save = self._click_with_fallback(self.sel.EXTRATO_EXCEL_SAVE)
+        if not clicked_save:
+            raise RuntimeError("Nao foi possivel confirmar o salvamento do extrato em Excel.")
         await self.log("OK Exportacao do extrato iniciada")
         await self.log("Aguardando 15s para download...")
         await asyncio.sleep(15)

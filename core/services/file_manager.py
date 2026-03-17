@@ -112,31 +112,30 @@ class FileManager:
         def _list_complete_files(base_dir: Path) -> List[str]:
             files = glob.glob(str(base_dir / pattern))
             excluded = exclude_paths or set()
-            return [
-                f for f in files
-                if (
-                    os.path.isfile(f)
-                    and not f.endswith((".crdownload", ".tmp", ".part"))
+            candidates: List[str] = []
+            for f in files:
+                if not os.path.isfile(f) or f.endswith((".crdownload", ".tmp", ".part")):
+                    continue
+
+                abs_path = os.path.abspath(f)
+                if abs_path not in excluded:
+                    candidates.append(f)
+                    continue
+
+                is_newer = (
+                    min_modified_time is not None
+                    and os.path.getmtime(f) >= min_modified_time
+                )
+                has_changed_signature = (
+                    preexisting_signatures is not None
                     and (
-                        os.path.abspath(f) not in excluded
-                        or (
-                            min_modified_time is not None
-                            and os.path.getmtime(f) >= min_modified_time
-                        )
-                        or (
-                            preexisting_signatures is not None
-                            and (
-                                FileManager._file_signature(f)
-                                != preexisting_signatures.get(os.path.abspath(f))
-                            )
-                        )
-                    )
-                    and (
-                        min_modified_time is None
-                        or os.path.getmtime(f) >= min_modified_time
+                        FileManager._file_signature(f)
+                        != preexisting_signatures.get(abs_path)
                     )
                 )
-            ]
+                if is_newer or has_changed_signature:
+                    candidates.append(f)
+            return candidates
 
         while time.time() - start_time < timeout_seconds:
             complete_files = _list_complete_files(downloads_dir)
@@ -199,31 +198,30 @@ class FileManager:
         def _list_complete_files(base_dir: Path) -> List[str]:
             files = glob.glob(str(base_dir / pattern))
             excluded = exclude_paths or set()
-            return [
-                f for f in files
-                if (
-                    os.path.isfile(f)
-                    and not f.endswith((".crdownload", ".tmp", ".part"))
+            candidates: List[str] = []
+            for f in files:
+                if not os.path.isfile(f) or f.endswith((".crdownload", ".tmp", ".part")):
+                    continue
+
+                abs_path = os.path.abspath(f)
+                if abs_path not in excluded:
+                    candidates.append(f)
+                    continue
+
+                is_newer = (
+                    min_modified_time is not None
+                    and os.path.getmtime(f) >= min_modified_time
+                )
+                has_changed_signature = (
+                    preexisting_signatures is not None
                     and (
-                        os.path.abspath(f) not in excluded
-                        or (
-                            min_modified_time is not None
-                            and os.path.getmtime(f) >= min_modified_time
-                        )
-                        or (
-                            preexisting_signatures is not None
-                            and (
-                                FileManager._file_signature(f)
-                                != preexisting_signatures.get(os.path.abspath(f))
-                            )
-                        )
-                    )
-                    and (
-                        min_modified_time is None
-                        or os.path.getmtime(f) >= min_modified_time
+                        FileManager._file_signature(f)
+                        != preexisting_signatures.get(abs_path)
                     )
                 )
-            ]
+                if is_newer or has_changed_signature:
+                    candidates.append(f)
+            return candidates
 
         while time.time() - start_time < timeout_seconds:
             complete_files = _list_complete_files(downloads_dir)

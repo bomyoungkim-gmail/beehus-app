@@ -185,6 +185,7 @@ class JefferiesConnector(BaseConnector):
             await actions.fill_credentials(credentials.username, credentials.password)
             await actions.request_otp()
             await actions.wait_for_otp(timeout_seconds=240)
+            await actions.dismiss_oneclick_overlay_if_present()
 
             # 2. Exportacoes
             if export_holdings and holdings_date:

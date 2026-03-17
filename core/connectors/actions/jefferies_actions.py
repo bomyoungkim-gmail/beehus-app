@@ -331,6 +331,49 @@ class JefferiesActions:
 
         raise RuntimeError("OTP attempts exceeded")
 
+    async def dismiss_oneclick_overlay_if_present(self) -> bool:
+        """
+        Dismiss optional eDelivery one-click modal shown after OTP.
+        Steps:
+        1) Click "Remind me later"
+        2) Wait cancel confirmation overlay
+        3) Click "Continue"
+        """
+        try:
+            if not self._is_visible(self.sel.ONECLICK_OVERLAY):
+                return False
+        except Exception:
+            return False
+
+        await self.log("INFO OneClick overlay detected; dismissing modal")
+
+        if not self._click_with_fallback(self.sel.ONECLICK_REMIND_LATER):
+            await self.log("WARN OneClick: could not click 'Remind me later'")
+            return False
+
+        try:
+            self.helpers.wait_for_visible(*self.sel.ONECLICK_CANCEL_OVERLAY)
+        except Exception:
+            await self.log("WARN OneClick: cancel confirmation overlay not detected")
+            return False
+
+        if not self._click_with_fallback(self.sel.ONECLICK_CONTINUE):
+            await self.log("WARN OneClick: could not click 'Continue'")
+            return False
+
+        try:
+            self.helpers.wait_for_invisibility(*self.sel.ONECLICK_CANCEL_OVERLAY)
+        except Exception:
+            pass
+
+        try:
+            self.helpers.wait_for_invisibility(*self.sel.OVERLAY_BACKDROP)
+        except Exception:
+            pass
+
+        await self.log("OK OneClick overlay dismissed")
+        return True
+
     # ========== EXPORTS ==========
 
     async def export_holdings(self, date: str = None) -> None:

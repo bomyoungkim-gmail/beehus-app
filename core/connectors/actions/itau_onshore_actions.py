@@ -217,6 +217,19 @@ class ItauOnshoreActions:
         await self.log("Abrindo menu principal...")
         self.helpers.hover_element(*self.sel.MENU)
         await self.log("OK Menu aberto")
+
+    async def ensure_menu_open(self) -> None:
+        """Garante que o menu principal esteja aberto antes de navegar em itens internos."""
+        try:
+            menu = self.helpers.wait_for_element(*self.sel.MENU)
+            expanded = (menu.get_attribute("aria-expanded") or "").strip().lower() == "true"
+            if expanded:
+                await self.log("INFO Menu ja estava aberto")
+                return
+        except Exception:
+            await self.log("WARN Nao foi possivel verificar estado do menu. Tentando abrir...")
+
+        await self.open_menu()
     
     async def navigate_to_posicao_diaria(self) -> None:
         """Navega para a página de Posição Diária."""
@@ -308,6 +321,7 @@ class ItauOnshoreActions:
         ver mais -> extrato -> dropdown produto -> continuar -> extrato pix -> salvar em pdf.
         """
         await self.log("INFO Iniciando fallback de historico (Pix/PDF)...")
+        await self.ensure_menu_open()
 
         if not self._click_with_fallback(self.sel.VER_MAIS):
             await self.log("WARN Fallback: nao encontrou 'ver mais'")
@@ -341,16 +355,16 @@ class ItauOnshoreActions:
 
             selected = ""
             try:
-                select.select_by_value("id:10417")
-                selected = "id:10417"
+                select.select_by_value("id:10416")
+                selected = "id:10416"
             except Exception:
                 try:
-                    select.select_by_visible_text("Previdência")
-                    selected = "Previdência"
+                    select.select_by_visible_text("Poupança")
+                    selected = "Poupança"
                 except Exception:
                     try:
-                        select.select_by_value("id:10416")
-                        selected = "id:10416"
+                        select.select_by_value("id:10417")
+                        selected = "id:10417"
                     except Exception:
                         # JS fallback by value/text contains
                         selected = self.driver.execute_script(
@@ -358,10 +372,10 @@ class ItauOnshoreActions:
                             const s = arguments[0];
                             if (!s) return '';
                             const opts = Array.from(s.options || []);
-                            let opt = opts.find(o => (o.value || '').trim() === 'id:10417');
-                            if (!opt) opt = opts.find(o => (o.textContent || '').toLowerCase().includes('previd'));
-                            if (!opt) opt = opts.find(o => (o.value || '').trim() === 'id:10416');
+                            let opt = opts.find(o => (o.value || '').trim() === 'id:10416');
                             if (!opt) opt = opts.find(o => (o.textContent || '').toLowerCase().includes('poup'));
+                            if (!opt) opt = opts.find(o => (o.value || '').trim() === 'id:10417');
+                            if (!opt) opt = opts.find(o => (o.textContent || '').toLowerCase().includes('previd'));
                             if (!opt) return '';
                             s.value = opt.value;
                             s.dispatchEvent(new Event('change', { bubbles: true }));
@@ -430,16 +444,26 @@ class ItauOnshoreActions:
     async def export_holdings(self) -> None:
         """Exporta o relatrio para Excel."""
         await self.log("Exportando para Excel...")
+        export_clicked = False
+
         try:
             self.helpers.click_element_maybe_shadow(*self.sel.EXPORT_EXCEL_BTN)
+            export_clicked = True
         except Exception:
             await self.log("Fallback: botao Excel nao encontrado, tentando alternativos...")
-            try:
-                self._click_with_fallback(self.sel.EXPORT_EXCEL_BTN_ALT)
-            except Exception:
-                # Fluxo alternativo: selecionar Excel e confirmar download
-                self._click_with_fallback(self.sel.EXCEL)
-                self._click_with_fallback(self.sel.BAIXAR)
+
+        if not export_clicked:
+            export_clicked = self._click_with_fallback(self.sel.EXPORT_EXCEL_BTN_ALT)
+
+        if not export_clicked:
+            # Fluxo alternativo: selecionar Excel e confirmar download.
+            selected_excel = self._click_with_fallback(self.sel.EXCEL)
+            clicked_download = self._click_with_fallback(self.sel.BAIXAR)
+            export_clicked = selected_excel and clicked_download
+
+        if not export_clicked:
+            raise RuntimeError("Nao foi possivel iniciar a exportacao de holdings (botao Excel/Baixar indisponivel).")
+
         await self.log("OK Exportacao iniciada")
         await self.log("Aguardando 15s para download...")
         await asyncio.sleep(15)

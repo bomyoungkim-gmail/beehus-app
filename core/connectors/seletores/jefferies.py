@@ -33,6 +33,20 @@ class SeletorJefferies:
     VERIFY_OTP = (By.ID, "verifyOTP")
     OTP_ERROR = (By.CSS_SELECTOR, "div.alert-inpage.error")
     OTP_RESEND = (By.ID, "sendNewCode")
+    ONECLICK_OVERLAY = (By.CSS_SELECTOR, "#cdk-overlay-0.edel-OneClick, .cdk-overlay-pane.modal.edel-OneClick")
+    ONECLICK_REMIND_LATER = (
+        By.XPATH,
+        "//button[contains(@class,'edel-OneClickEnroll_Cancel')][.//span[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'remind me later')]]",
+    )
+    ONECLICK_CANCEL_OVERLAY = (
+        By.CSS_SELECTOR,
+        "#cdk-overlay-1.edel-OneClickEnrollCancel, .cdk-overlay-pane.modal.edel-OneClickEnrollCancel",
+    )
+    ONECLICK_CONTINUE = (
+        By.XPATH,
+        "//button[@mat-stroked-button][.//span[normalize-space()='Continue']]"
+        " | //div[contains(@class,'edel-OneClickEnrollCancel')]//button[.//span[normalize-space()='Continue']]",
+    )
 
     # Holdings
     NAV_ACCOUNTS = (By.CSS_SELECTOR, "a.nav-accounts")

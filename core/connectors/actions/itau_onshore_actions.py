@@ -115,6 +115,26 @@ class ItauOnshoreActions:
         except Exception:
             pass
         return None
+
+    def _click_in_default_or_iframes(self, locator, timeout: int = 20) -> bool:
+        """
+        Click an element even if it is inside nested iframes/windows.
+        Keeps driver in found context.
+        """
+        target = self._find_in_default_or_iframes(locator, timeout=timeout)
+        if target is None:
+            return False
+        try:
+            self.helpers.wait_until(lambda d: target.is_displayed() and target.is_enabled(), timeout=8)
+            target.click()
+            return True
+        except Exception:
+            try:
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", target)
+                self.driver.execute_script("arguments[0].click();", target)
+                return True
+            except Exception:
+                return False
     
     # ========== NAVEGAÇÃO ==========
     
@@ -402,17 +422,17 @@ class ItauOnshoreActions:
             await self.log(f"WARN Fallback: falha ao selecionar produto no dropdown: {e}")
             return False
 
-        if not self._click_with_fallback(self.sel.CONTINUAR):
+        if not self._click_in_default_or_iframes(self.sel.CONTINUAR, timeout=20):
             await self.log("WARN Fallback: nao encontrou botao 'Continuar'")
             return False
         await self.log("OK Fallback: clicou em 'Continuar'")
 
-        if not self._click_with_fallback(self.sel.EXTRATO_PIX):
+        if not self._click_in_default_or_iframes(self.sel.EXTRATO_PIX, timeout=30):
             await self.log("WARN Fallback: nao encontrou botao 'Extrato Pix'")
             return False
         await self.log("OK Fallback: clicou em 'Extrato Pix'")
 
-        if not self._click_with_fallback(self.sel.SALVAR_PDF):
+        if not self._click_in_default_or_iframes(self.sel.SALVAR_PDF, timeout=30):
             await self.log("WARN Fallback: nao encontrou botao 'salvar em pdf'")
             return False
 

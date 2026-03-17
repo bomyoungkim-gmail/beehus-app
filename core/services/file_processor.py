@@ -261,7 +261,14 @@ class FileProcessorService:
             try:
                 import pandas as pd
                 df = pd.read_csv(str(p), sep=None, engine="python")
-                cols = set(map(str, df.columns))
+                # Normalize headers to avoid false negatives caused by UTF-8 BOM,
+                # trailing spaces, or accidental case drift in processor outputs.
+                def _norm_col(name: Any) -> str:
+                    text = str(name or "")
+                    text = text.replace("\ufeff", "").strip()
+                    return text
+
+                cols = {_norm_col(c) for c in df.columns}
                 missing = sorted(required_cols - cols)
                 if missing:
                     return f"Processed output missing required columns: {', '.join(missing)}."

@@ -8,6 +8,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (window.location.hostname === "localhost") {
+        const url = new URL(window.location.href);
+        url.hostname = "127.0.0.1";
+        window.location.replace(url.toString());
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

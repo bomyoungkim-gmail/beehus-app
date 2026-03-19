@@ -20,6 +20,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const UserProfile = lazy(() => import("./pages/UserProfile"));
 const Downloads = lazy(() => import("./pages/Downloads"));
 const ConferenciaAtivo = lazy(() => import("./pages/ConferenciaAtivo"));
+const CadastroAtivoRF = lazy(() => import("./pages/CadastroAtivoRF"));
 
 function App() {
   return (
@@ -126,6 +127,15 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <ConferenciaAtivo />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/cadastro-ativo-rf"
+                element={
+                  <ProtectedRoute>
+                    <CadastroAtivoRF />
                   </ProtectedRoute>
                 }
               />

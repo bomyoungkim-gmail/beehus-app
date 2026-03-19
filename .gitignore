@@ -43,3 +43,5 @@ docker-compose.yml.dev
 
 # Reservado
 plano/
+.pytest_tmp_old/
+.pytest_tmp/

@@ -86,6 +86,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-7 8h8a2 2 0 002-2V6a2 2 0 00-2-2h-3.5l-1-1h-3l-1 1H8a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
             {!isCollapsed && <span>Conferencia Ativo</span>}
           </Link>
+          <Link to="/cadastro-ativo-rf" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/cadastro-ativo-rf')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Cadastro Ativo RF" : ""}>
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18M3 17h18"></path></svg>
+            {!isCollapsed && <span>Cadastro Ativo RF</span>}
+          </Link>
           <div className={`my-2 border-t border-dark-border/70 ${isCollapsed ? 'mx-1' : 'mx-2'}`} />
           {isAdmin && (
             <Link to="/users" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/users')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Users" : ""}>

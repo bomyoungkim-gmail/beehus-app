@@ -521,7 +521,8 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                     "jefferies_login",
                     "jpmorgan_login",
                     "itau_onshore_login",
-                    "btg_offshore_login",
+                    "btg_us_login",
+                    "btg_cayman_login",
                 }
                 if (
                     result.success

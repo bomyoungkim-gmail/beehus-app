@@ -1013,7 +1013,8 @@ export default function Jobs() {
                                         <option value="itau_onshore_login">Itau Onshore Login</option>
                                         <option value="itau_offshore_login">Itau Offshore Login</option>
                                         <option value="btg_onshore_login">BTG Onshore Login</option>
-                                        <option value="btg_offshore_login">BTG Offshore Login</option>
+                                        <option value="btg_us_login">BTG US Login</option>
+                                        <option value="btg_cayman_login">BTG Cayman Login</option>
                                         <option value="btg_mfo_login">BTG MFO Login</option>
                                         <option value="morgan_stanley_login">Morgan Stanley Login</option>
                                         <option value="jefferies_login">Jefferies Login</option>
@@ -1071,7 +1072,7 @@ export default function Jobs() {
                                         </div>
                                     ) : (
                                         <>
-                                            {['jpmorgan_login', 'itau_onshore_login', 'itau_offshore_login', 'btg_onshore_login', 'btg_offshore_login', 'btg_mfo_login', 'morgan_stanley_login', 'jefferies_login'].includes(formData.connector) ? (
+                                            {['jpmorgan_login', 'itau_onshore_login', 'itau_offshore_login', 'btg_onshore_login', 'btg_us_login', 'btg_cayman_login', 'btg_mfo_login', 'morgan_stanley_login', 'jefferies_login'].includes(formData.connector) ? (
                                                 <div className="space-y-4">
                                                     {/* Credential Selector */}
                                                     <div>

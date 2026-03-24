@@ -1,0 +1,1903 @@
+diff --git a/beehus-web/src/pages/CadastroAtivoRF.tsx b/beehus-web/src/pages/CadastroAtivoRF.tsx
+index aa3b02b..6bc6e35 100644
+--- a/beehus-web/src/pages/CadastroAtivoRF.tsx
++++ b/beehus-web/src/pages/CadastroAtivoRF.tsx
+@@ -1,4 +1,4 @@
+-import { useMemo, useRef, useState } from 'react';
++import { useEffect, useMemo, useRef, useState } from 'react';
+ import type { ChangeEvent } from 'react';
+ import {
+   flexRender,
+@@ -12,6 +12,7 @@ import {
+ import type {
+   ColumnDef,
+   ColumnFiltersState,
++  ColumnVisibilityState,
+   ExpandedState,
+   FilterFn,
+   GroupingState,
+@@ -29,11 +30,20 @@ type RFRow = {
+   maturityDate: string;
+   rate: string;
+   indexer: string;
+-  ticker: string;
+-  ctipseliccode: string;
+-};
++} & Record<string, string>;
+ 
+ type XPFixedIncomeRecord = Record<string, unknown>;
++type DivergenceMode = 'or' | 'and';
++type CategoryRule = {
++  nameTerms: string;
++  tickerTerms: string;
++};
++
++const GLOBAL_DEFAULT_DIVERGENCE_MODE: DivergenceMode = 'or';
++const GLOBAL_DEFAULT_CATEGORY_RULES: Record<string, CategoryRule> = {
++  'LF-SUB': { nameTerms: 'LFSN', tickerTerms: '' },
++  OVER: { nameTerms: 'Compromissada', tickerTerms: '' },
++};
+ 
+ function pickFirst(record: Record<string, unknown>, keys: string[]): unknown {
+   for (const key of keys) {
+@@ -73,6 +83,40 @@ function normalizeText(value: unknown): string {
+   return String(value).trim();
+ }
+ 
++function normalizeCellValue(value: unknown): string {
++  if (value === undefined || value === null) {
++    return '';
++  }
++  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
++    return String(value).trim();
++  }
++  if (Array.isArray(value)) {
++    if (value.length === 0) {
++      return '';
++    }
++    return JSON.stringify(value);
++  }
++  if (typeof value === 'object') {
++    return JSON.stringify(value);
++  }
++  return String(value);
++}
++
++function normalizeForMatch(value: string): string {
++  return value
++    .normalize('NFD')
++    .replace(/[\u0300-\u036f]/g, '')
++    .toLowerCase()
++    .replace(/[^a-z0-9]/g, '');
++}
++
++function parseMatchTerms(value: string): string[] {
++  return value
++    .split(',')
++    .map((part) => normalizeForMatch(part))
++    .filter((part) => part.length > 0);
++}
++
+ function normalizeCategory(value: unknown): string {
+   const text = normalizeText(value);
+   return text ? text.toUpperCase() : 'SEM CATEGORIA';
+@@ -91,6 +135,26 @@ function normalizeRate(value: unknown, percentValue?: unknown): string {
+   return '';
+ }
+ 
++function extractExtraFields(
++  record: Record<string, unknown>,
++  excludedKeys: string[],
++): Record<string, string> {
++  const excluded = new Set(excludedKeys);
++  const out: Record<string, string> = {};
++
++  for (const [key, value] of Object.entries(record)) {
++    if (excluded.has(key)) {
++      continue;
++    }
++    const normalized = normalizeCellValue(value);
++    if (normalized !== '') {
++      out[key] = normalized;
++    }
++  }
++
++  return out;
++}
++
+ async function readJsonFile(file: File): Promise<unknown> {
+   return new Promise((resolve, reject) => {
+     const reader = new FileReader();
+@@ -127,6 +191,27 @@ function mapBeehusData(payload: unknown): RFRow[] {
+       );
+       const indexer = normalizeText(pickFirst(item, ['indexer', 'indexDsc', 'strategy']));
+       const rate = normalizeRate(item['yield'], item['indexerPercentual']);
++      const ticker = normalizeText(pickFirst(item, ['ticker', 'mainId']));
++      const extraFields = extractExtraFields(item, [
++        '_id',
++        'beehusName',
++        'name',
++        'asset',
++        'ticker',
++        'mainId',
++        'type',
++        'category',
++        'marketType',
++        'maturityDate',
++        'dueDate',
++        'expirationDate',
++        'due_date',
++        'indexer',
++        'indexDsc',
++        'strategy',
++        'yield',
++        'indexerPercentual',
++      ]);
+ 
+       return {
+         id: `beehus-${idx}-${name || 'ativo'}`,
+@@ -135,8 +220,8 @@ function mapBeehusData(payload: unknown): RFRow[] {
+         maturityDate,
+         rate,
+         indexer,
+-        ticker: normalizeText(pickFirst(item, ['ticker', 'mainId'])),
+-        ctipseliccode: '',
++        ticker,
++        ...extraFields,
+       };
+     });
+ }
+@@ -192,6 +277,24 @@ function mapXPData(payload: unknown): RFRow[] {
+     const maturityDate = normalizeDate(pickFirst(item, ['dueDate', 'maturityDate', 'expirationDate']));
+     const indexer = normalizeText(pickFirst(item, ['indexDsc', 'indexer', 'strategy']));
+     const rate = normalizeRate(item['rate'], item['percentage']);
++    const ctipseliccode = normalizeText(pickFirst(item, ['cetipSelicCode', 'ctipseliccode']));
++    const extraFields = extractExtraFields(item, [
++      'asset',
++      'name',
++      'ticker',
++      'assetId',
++      'cetipSelicCode',
++      'ctipseliccode',
++      'marketType',
++      'type',
++      'category',
++      'dueDate',
++      'maturityDate',
++      'expirationDate',
++      'indexer',
++      'strategy',
++      'rate',
++    ]);
+ 
+     return {
+       id: `xp-${idx}-${name || 'ativo'}`,
+@@ -200,8 +303,8 @@ function mapXPData(payload: unknown): RFRow[] {
+       maturityDate,
+       rate,
+       indexer,
+-      ticker: '',
+-      ctipseliccode: normalizeText(pickFirst(item, ['cetipSelicCode', 'ctipseliccode'])),
++      ctipseliccode,
++      ...extraFields,
+     };
+   });
+ }
+@@ -212,15 +315,9 @@ const globalContainsFilter: FilterFn<RFRow> = (row, _columnId, filterValue) => {
+     return true;
+   }
+ 
+-  const combined = [
+-    row.original.name,
+-    row.original.category,
+-    row.original.maturityDate,
+-    row.original.rate,
+-    row.original.indexer,
+-    row.original.ticker,
+-    row.original.ctipseliccode,
+-  ]
++  const combined = Object.entries(row.original)
++    .filter(([key]) => key !== 'id')
++    .map(([, value]) => value)
+     .join(' ')
+     .toLowerCase();
+ 
+@@ -255,23 +352,67 @@ const baseColumns: ColumnDef<RFRow>[] = [
+   },
+ ];
+ 
+-const beehusColumns: ColumnDef<RFRow>[] = [
+-  {
+-    accessorKey: 'ticker',
+-    header: 'Ticker',
+-    enableGrouping: false,
+-  },
+-  ...baseColumns,
+-];
++function collectDatasetKeys(rows: RFRow[]): string[] {
++  const keySet = new Set<string>();
++  for (const row of rows) {
++    for (const key of Object.keys(row)) {
++      if (key !== 'id') {
++        keySet.add(key);
++      }
++    }
++  }
++  return Array.from(keySet);
++}
+ 
+-const xpColumns: ColumnDef<RFRow>[] = [
+-  {
+-    accessorKey: 'ctipseliccode',
+-    header: 'ctipseliccode',
+-    enableGrouping: false,
+-  },
+-  ...baseColumns,
+-];
++function buildColumns(keys: string[], leadingKeys: string[]): ColumnDef<RFRow>[] {
++  const leading = leadingKeys.filter((key) => keys.includes(key));
++  const remaining = keys
++    .filter((key) => !leading.includes(key))
++    .sort((a, b) => a.localeCompare(b));
++
++  const ordered = [...leading, ...remaining];
++  return ordered.map((key) => ({
++    accessorKey: key,
++    header: key === 'category'
++      ? 'Tipo/Categoria'
++      : key === 'name'
++      ? 'Nome'
++      : key === 'maturityDate'
++      ? 'Vencimento'
++      : key === 'rate'
++      ? 'Taxa'
++      : key === 'indexer'
++      ? 'Indexador'
++      : key,
++    enableGrouping: key === 'category',
++  }));
++}
++
++function buildDefaultVisibility(
++  keys: string[],
++  defaultVisibleKeys: string[],
++): ColumnVisibilityState {
++  const defaults = new Set(defaultVisibleKeys);
++  const visibility: ColumnVisibilityState = {};
++  for (const key of keys) {
++    visibility[key] = defaults.has(key);
++  }
++  return visibility;
++}
++
++function downloadJsonFile(payload: unknown, filename: string) {
++  const blob = new Blob([JSON.stringify(payload, null, 2)], {
++    type: 'application/json;charset=utf-8;',
++  });
++  const url = URL.createObjectURL(blob);
++  const link = document.createElement('a');
++  link.href = url;
++  link.setAttribute('download', filename);
++  document.body.appendChild(link);
++  link.click();
++  document.body.removeChild(link);
++  URL.revokeObjectURL(url);
++}
+ 
+ type RfTableProps = {
+   title: string;
+@@ -286,6 +427,10 @@ type RfTableProps = {
+   onExpandedChange: OnChangeFn<ExpandedState>;
+   sorting: SortingState;
+   onSortingChange: OnChangeFn<SortingState>;
++  columnVisibility: ColumnVisibilityState;
++  onColumnVisibilityChange: OnChangeFn<ColumnVisibilityState>;
++  enableDivergenceTools?: boolean;
++  enableCategoryExport?: boolean;
+   onLeafRowClick?: (row: RFRow) => void;
+ };
+ 
+@@ -302,9 +447,26 @@ function RfTable({
+   onExpandedChange,
+   sorting,
+   onSortingChange,
++  columnVisibility,
++  onColumnVisibilityChange,
++  enableDivergenceTools = true,
++  enableCategoryExport = false,
+   onLeafRowClick,
+ }: RfTableProps) {
+   const containerRef = useRef<HTMLDivElement>(null);
++  const [showColumnEditor, setShowColumnEditor] = useState(false);
++  const [columnSearch, setColumnSearch] = useState('');
++  const [divergentIds, setDivergentIds] = useState<Set<string>>(new Set());
++  const [divergenceActive, setDivergenceActive] = useState(false);
++  const [showRuleEditor, setShowRuleEditor] = useState(false);
++  const [ruleSearch, setRuleSearch] = useState('');
++  const [divergenceMode, setDivergenceMode] = useState<DivergenceMode>(GLOBAL_DEFAULT_DIVERGENCE_MODE);
++  const [categoryRules, setCategoryRules] = useState<Record<string, CategoryRule>>(
++    GLOBAL_DEFAULT_CATEGORY_RULES,
++  );
++  const [hasHydratedRules, setHasHydratedRules] = useState(false);
++  const [showCategorySelector, setShowCategorySelector] = useState(false);
++  const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
+ 
+   const table = useReactTable({
+     data,
+@@ -315,11 +477,13 @@ function RfTable({
+       grouping,
+       expanded,
+       sorting,
++      columnVisibility,
+     },
+     onColumnFiltersChange,
+     onGroupingChange,
+     onExpandedChange,
+     onSortingChange,
++    onColumnVisibilityChange,
+     globalFilterFn: globalContainsFilter,
+     getCoreRowModel: getCoreRowModel(),
+     getFilteredRowModel: getFilteredRowModel(),
+@@ -337,11 +501,552 @@ function RfTable({
+   });
+ 
+   const items = virtualizer.getVirtualItems();
++  const editableColumns = table
++    .getAllLeafColumns()
++    .filter((column) =>
++      column.id.toLowerCase().includes(columnSearch.trim().toLowerCase()),
++    );
++  const categories = useMemo(
++    () =>
++      Array.from(
++        new Set(
++          data
++            .map((row) => row.category)
++            .filter((value) => typeof value === 'string' && value.trim() !== ''),
++        ),
++      ).sort((a, b) => a.localeCompare(b)),
++    [data],
++  );
++  const ruleStorageKey = useMemo(
++    () => `cadastro_ativo_rf_rules_${title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
++    [title],
++  );
++
++  useEffect(() => {
++    try {
++      const raw = window.localStorage.getItem(ruleStorageKey);
++      if (raw) {
++        const parsed = JSON.parse(raw) as {
++          divergenceMode?: DivergenceMode;
++          categoryRules?: Record<string, CategoryRule>;
++        };
++        if (parsed.divergenceMode === 'or' || parsed.divergenceMode === 'and') {
++          setDivergenceMode(parsed.divergenceMode);
++        }
++        if (parsed.categoryRules && typeof parsed.categoryRules === 'object') {
++          setCategoryRules((current) => ({ ...current, ...parsed.categoryRules }));
++        }
++      }
++    } catch {
++      // Ignore localStorage read/parse errors and keep global defaults.
++    } finally {
++      setHasHydratedRules(true);
++    }
++  }, [ruleStorageKey]);
++
++  useEffect(() => {
++    setCategoryRules((current) => {
++      const next: Record<string, CategoryRule> = { ...current };
++      for (const category of categories) {
++        if (!next[category]) {
++          next[category] = {
++            nameTerms: category,
++            tickerTerms: category,
++          };
++        }
++      }
++      return next;
++    });
++  }, [categories]);
++
++  useEffect(() => {
++    if (!hasHydratedRules) {
++      return;
++    }
++    window.localStorage.setItem(
++      ruleStorageKey,
++      JSON.stringify({
++        divergenceMode,
++        categoryRules,
++      }),
++    );
++  }, [hasHydratedRules, divergenceMode, categoryRules, ruleStorageKey]);
++
++  const filteredCategories = categories.filter((category) =>
++    category.toLowerCase().includes(ruleSearch.trim().toLowerCase()),
++  );
++  const hasOpenOverlay = showColumnEditor || showRuleEditor;
++  const selectedRowsForExport = useMemo(
++    () => data.filter((row) => selectedCategories.has(row.category)),
++    [data, selectedCategories],
++  );
++
++  const updateCategoryRule = (
++    category: string,
++    key: keyof CategoryRule,
++    value: string,
++  ) => {
++    setCategoryRules((current) => ({
++      ...current,
++      [category]: {
++        nameTerms: current[category]?.nameTerms ?? category,
++        tickerTerms: current[category]?.tickerTerms ?? category,
++        [key]: value,
++      },
++    }));
++  };
++
++  const toggleCategorySelection = (category: string) => {
++    setSelectedCategories((current) => {
++      const next = new Set(current);
++      if (next.has(category)) {
++        next.delete(category);
++      } else {
++        next.add(category);
++      }
++      return next;
++    });
++  };
++
++  const formatDateDdMmYyyy = (value: string): string => {
++    if (!value) {
++      return '';
++    }
++    const parsed = new Date(value);
++    if (Number.isNaN(parsed.getTime())) {
++      const isoLike = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
++      if (isoLike) {
++        return `${isoLike[3]}/${isoLike[2]}/${isoLike[1]}`;
++      }
++      return value;
++    }
++    const dd = String(parsed.getDate()).padStart(2, '0');
++    const mm = String(parsed.getMonth() + 1).padStart(2, '0');
++    const yyyy = parsed.getFullYear();
++    return `${dd}/${mm}/${yyyy}`;
++  };
++
++  const escapeCsv = (value: string) => {
++    const text = value ?? '';
++    if (text.includes(',') || text.includes('"') || text.includes('\n')) {
++      return `"${text.replace(/"/g, '""')}"`;
++    }
++    return text;
++  };
++
++  const toNumberOrZero = (value: string): number => {
++    const normalized = String(value ?? '')
++      .replace('%', '')
++      .replace(',', '.')
++      .trim();
++    const num = Number(normalized);
++    return Number.isFinite(num) ? num : 0;
++  };
++
++  const formatRatePercent = (value: string): string => {
++    const raw = String(value ?? '').trim().replace(/^\+\s*/, '');
++    if (!raw) {
++      return '';
++    }
++    if (raw.includes('%')) {
++      return raw;
++    }
++    const numeric = Number(raw.replace(',', '.'));
++    if (!Number.isFinite(numeric)) {
++      return raw;
++    }
++    return `${raw}%`;
++  };
++
++  const buildBeehusNameForXpRow = (row: RFRow): string => {
++    const marketType = String(row.marketType ?? row.category ?? '').trim();
++    const issuer = String(row.issuer ?? '').trim();
++    const indexDsc = String(row.indexDsc ?? row.indexer ?? '').trim();
++    const percentage = String(row.percentage ?? '').trim();
++    const rateRaw = String(row.rate ?? '').trim();
++    const rateNum = toNumberOrZero(rateRaw);
++    const ratePart = rateNum !== 0 ? `+ ${rateRaw}` : '';
++    const normalizedIndexer = normalizeForMatch(indexDsc);
++    const dueDate = formatDateDdMmYyyy(String(row.dueDate ?? row.maturityDate ?? ''));
++
++    if (normalizedIndexer === 'fixedrate') {
++      const fixedRate = formatRatePercent(rateRaw);
++      return [marketType, issuer, fixedRate, dueDate]
++        .map((part) => part.trim())
++        .filter((part) => part !== '')
++        .join(' ');
++    }
++
++    const percentageAndIndexer = percentage
++      ? `${percentage}% ${indexDsc}`.trim()
++      : indexDsc;
++    const indexComposite = [percentageAndIndexer, ratePart]
++      .filter((part) => part !== '')
++      .join(' ');
++
++    return [marketType, issuer, indexComposite, dueDate]
++      .map((part) => part.trim())
++      .filter((part) => part !== '')
++      .join(' ');
++  };
++
++  const exportSelectedCategoriesToCsv = () => {
++    if (selectedRowsForExport.length === 0) {
++      return;
++    }
++    const headers = [
++      'BeehusName',
++      'Emissor',
++      'Type',
++      'Vencimento',
++      'Ticker',
++      'Yield',
++      'Indexer',
++      'Indexer Percentual',
++    ];
++    const lines = selectedRowsForExport.map((row) => {
++      const issuer = String(row.issuer ?? '').trim();
++      const marketType = String(row.marketType ?? row.category ?? '').trim();
++      const vencimento = formatDateDdMmYyyy(String(row.dueDate ?? row.maturityDate ?? ''));
++      const ticker = String(row.cetipSelicCode ?? row.ctipseliccode ?? '').trim();
++      const yieldValue = String(row.rate ?? '').trim();
++      const indexer = String(row.indexDsc ?? row.indexer ?? '').trim();
++      const indexerPercentual = String(row.percentage ?? '').trim();
++
++      const cols = [
++        buildBeehusNameForXpRow(row),
++        issuer,
++        marketType,
++        vencimento,
++        ticker,
++        yieldValue,
++        indexer,
++        indexerPercentual,
++      ];
++      return cols.map(escapeCsv).join(',');
++    });
++    const csv = [headers.join(','), ...lines].join('\n');
++    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
++    const url = URL.createObjectURL(blob);
++    const link = document.createElement('a');
++    const filenameBase = title
++      .toLowerCase()
++      .replace(/[^a-z0-9]+/g, '_')
++      .replace(/^_|_$/g, '');
++    link.href = url;
++    link.setAttribute('download', `${filenameBase}_selecionados.csv`);
++    document.body.appendChild(link);
++    link.click();
++    document.body.removeChild(link);
++    URL.revokeObjectURL(url);
++  };
++
++  const runDivergenceCheck = () => {
++    const divergentRows = data.filter((row) => {
++      const category = normalizeForMatch(row.category || '');
++      const rawCategory = row.category || '';
++      const ticker = normalizeForMatch(row.ticker || '');
++      const name = normalizeForMatch(row.name || '');
++      if (!category) {
++        return false;
++      }
++
++      const rule = categoryRules[rawCategory] ?? {
++        nameTerms: rawCategory,
++        tickerTerms: rawCategory,
++      };
++
++      const nameTerms = parseMatchTerms(rule.nameTerms);
++      const tickerTerms = parseMatchTerms(rule.tickerTerms);
++
++      const hasNameRule = nameTerms.length > 0;
++      const hasTickerRule = tickerTerms.length > 0;
++
++      // Sem termos configurados para a categoria => nao aplicar divergencia.
++      if (!hasNameRule && !hasTickerRule) {
++        return false;
++      }
++
++      const nameMatch = hasNameRule
++        ? nameTerms.some((term) => name.includes(term))
++        : true;
++      const tickerMatch = hasTickerRule
++        ? tickerTerms.some((term) => ticker.includes(term))
++        : true;
++
++      const isMatch = divergenceMode === 'and'
++        ? nameMatch && tickerMatch
++        : (hasNameRule && nameMatch) || (hasTickerRule && tickerMatch);
++
++      return !isMatch;
++    });
++
++    setDivergentIds(new Set(divergentRows.map((row) => row.id)));
++    setDivergenceActive(true);
++
++    const filenameBase = title
++      .toLowerCase()
++      .replace(/[^a-z0-9]+/g, '_')
++      .replace(/^_|_$/g, '');
++
++    downloadJsonFile(
++      divergentRows.map((row) => ({
++        ...row,
++        divergenceReason:
++          divergenceMode === 'and'
++            ? 'regra nao satisfeita: nome E ticker'
++            : 'regra nao satisfeita: nome OU ticker',
++        divergenceMode,
++        divergenceRule: categoryRules[row.category] ?? {
++          nameTerms: row.category || '',
++          tickerTerms: row.category || '',
++        },
++      })),
++      `${filenameBase}_divergencias.json`,
++    );
++  };
++
++  const clearDivergence = () => {
++    setDivergenceActive(false);
++    setDivergentIds(new Set());
++  };
+ 
+   return (
+-    <section className="glass rounded-xl border border-white/10 p-4">
+-      <header className="mb-3 flex items-center justify-between">
+-        <h3 className="text-sm font-semibold text-white">{title}</h3>
++    <section
++      className={`glass relative rounded-xl border border-white/10 p-4 ${
++        hasOpenOverlay ? 'z-[70]' : 'z-0'
++      }`}
++    >
++      <header className="mb-3 flex items-center justify-between gap-3">
++        <div className="flex items-center gap-3">
++          <h3 className="text-sm font-semibold text-white">{title}</h3>
++          <div className="relative">
++            <button
++              type="button"
++              onClick={() => setShowColumnEditor((current) => !current)}
++              className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
++            >
++              Editar colunas
++            </button>
++            {showColumnEditor && (
++              <div className="absolute left-0 top-9 z-[80] w-72 rounded-lg border border-slate-700 bg-slate-900 p-3 shadow-xl">
++                <div className="mb-2 text-xs font-semibold text-slate-300">
++                  Colunas detectadas ({table.getAllLeafColumns().length})
++                </div>
++                <input
++                  value={columnSearch}
++                  onChange={(event) => setColumnSearch(event.target.value)}
++                  placeholder="Buscar campo..."
++                  className="mb-2 block w-full rounded border border-slate-700 bg-slate-950/80 px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-500"
++                />
++                <div className="mb-2 flex items-center gap-2">
++                  <button
++                    type="button"
++                    onClick={() => table.getAllLeafColumns().forEach((column) => column.toggleVisibility(true))}
++                    className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
++                  >
++                    Selecionar todos
++                  </button>
++                  <button
++                    type="button"
++                    onClick={() => table.getAllLeafColumns().forEach((column) => column.toggleVisibility(false))}
++                    className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
++                  >
++                    Limpar
++                  </button>
++                </div>
++                <div className="max-h-72 space-y-2 overflow-auto pr-1">
++                  {editableColumns.map((column) => (
++                    <label key={column.id} className="flex items-center gap-2 text-xs text-slate-200">
++                      <input
++                        type="checkbox"
++                        checked={column.getIsVisible()}
++                        onChange={column.getToggleVisibilityHandler()}
++                        className="rounded border-slate-600 bg-slate-950"
++                      />
++                      <span>
++                        {typeof column.columnDef.header === 'string'
++                          ? column.columnDef.header
++                          : column.id}
++                      </span>
++                    </label>
++                  ))}
++                  {editableColumns.length === 0 && (
++                    <div className="text-xs text-slate-400">Nenhuma coluna encontrada.</div>
++                  )}
++                </div>
++              </div>
++            )}
++          </div>
++          {enableDivergenceTools && (
++            <>
++              <button
++                type="button"
++                onClick={divergenceActive ? clearDivergence : runDivergenceCheck}
++                className={`rounded-md border px-2 py-1 text-xs ${
++                  divergenceActive
++                    ? 'border-red-500/60 bg-red-500/15 text-red-200'
++                    : 'border-slate-600 text-slate-200 hover:bg-slate-800'
++                }`}
++              >
++                {divergenceActive ? 'Limpar divergencia' : 'Divergencia'}
++              </button>
++              <div className="relative">
++                <button
++                  type="button"
++                  onClick={() => setShowRuleEditor((current) => !current)}
++                  className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
++                >
++                  Regras divergencia
++                </button>
++                {showRuleEditor && (
++                  <div className="absolute left-0 top-9 z-[80] w-[520px] rounded-lg border border-slate-700 bg-slate-900 p-3 shadow-xl">
++                    <div className="mb-2 text-xs font-semibold text-slate-300">
++                      Configuracao de regra
++                    </div>
++                    <div className="mb-3 flex items-center gap-4 text-xs text-slate-200">
++                      <label className="flex items-center gap-2">
++                        <input
++                          type="radio"
++                          name={`divergence-mode-${title}`}
++                          checked={divergenceMode === 'or'}
++                          onChange={() => setDivergenceMode('or')}
++                        />
++                        Nome OU Ticker
++                      </label>
++                      <label className="flex items-center gap-2">
++                        <input
++                          type="radio"
++                          name={`divergence-mode-${title}`}
++                          checked={divergenceMode === 'and'}
++                          onChange={() => setDivergenceMode('and')}
++                        />
++                        Nome E Ticker
++                      </label>
++                    </div>
++                    <input
++                      value={ruleSearch}
++                      onChange={(event) => setRuleSearch(event.target.value)}
++                      placeholder="Buscar tipo/categoria..."
++                      className="mb-2 block w-full rounded border border-slate-700 bg-slate-950/80 px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-500"
++                    />
++                    <div className="mb-2 text-[11px] text-slate-400">
++                      Termos separados por virgula. Exemplo: `cri, certrecebiveis`
++                    </div>
++                    <div className="max-h-72 overflow-auto rounded border border-slate-800">
++                      <table className="w-full text-xs">
++                        <thead className="sticky top-0 bg-slate-950">
++                          <tr>
++                            <th className="px-2 py-1 text-left text-slate-300">Tipo/Categoria</th>
++                            <th className="px-2 py-1 text-left text-slate-300">Buscar em Nome</th>
++                            <th className="px-2 py-1 text-left text-slate-300">Buscar em Ticker</th>
++                          </tr>
++                        </thead>
++                        <tbody>
++                          {filteredCategories.map((category) => (
++                            <tr key={category} className="border-t border-slate-800">
++                              <td className="px-2 py-1 text-slate-200">{category}</td>
++                              <td className="px-2 py-1">
++                                <input
++                                  value={categoryRules[category]?.nameTerms ?? category}
++                                  onChange={(event) =>
++                                    updateCategoryRule(category, 'nameTerms', event.target.value)
++                                  }
++                                  className="block w-full rounded border border-slate-700 bg-slate-950/80 px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-500"
++                                />
++                              </td>
++                              <td className="px-2 py-1">
++                                <input
++                                  value={categoryRules[category]?.tickerTerms ?? category}
++                                  onChange={(event) =>
++                                    updateCategoryRule(category, 'tickerTerms', event.target.value)
++                                  }
++                                  className="block w-full rounded border border-slate-700 bg-slate-950/80 px-2 py-1 text-xs text-slate-200 outline-none focus:border-brand-500"
++                                />
++                              </td>
++                            </tr>
++                          ))}
++                          {filteredCategories.length === 0 && (
++                            <tr>
++                              <td colSpan={3} className="px-2 py-2 text-slate-400">
++                                Nenhuma categoria encontrada.
++                              </td>
++                            </tr>
++                          )}
++                        </tbody>
++                      </table>
++                    </div>
++                  </div>
++                )}
++              </div>
++              {divergenceActive && (
++                <span className="text-xs text-red-300">
++                  {divergentIds.size} linha(s) divergente(s)
++                </span>
++              )}
++            </>
++          )}
++          {enableCategoryExport && (
++            <>
++              <div className="relative">
++                <button
++                  type="button"
++                  onClick={() => setShowCategorySelector((current) => !current)}
++                  className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
++                >
++                  Selecionar categoria
++                </button>
++                {showCategorySelector && (
++                  <div className="absolute left-0 top-9 z-[80] w-64 rounded-lg border border-slate-700 bg-slate-900 p-3 shadow-xl">
++                    <div className="mb-2 text-xs font-semibold text-slate-300">
++                      Tipo/Categoria ({categories.length})
++                    </div>
++                    <div className="mb-2 flex items-center gap-2">
++                      <button
++                        type="button"
++                        onClick={() => setSelectedCategories(new Set(categories))}
++                        className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
++                      >
++                        Todos
++                      </button>
++                      <button
++                        type="button"
++                        onClick={() => setSelectedCategories(new Set())}
++                        className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-800"
++                      >
++                        Limpar
++                      </button>
++                    </div>
++                    <div className="max-h-72 space-y-2 overflow-auto pr-1">
++                      {categories.map((category) => (
++                        <label key={category} className="flex items-center gap-2 text-xs text-slate-200">
++                          <input
++                            type="checkbox"
++                            checked={selectedCategories.has(category)}
++                            onChange={() => toggleCategorySelection(category)}
++                            className="rounded border-slate-600 bg-slate-950"
++                          />
++                          <span>{category}</span>
++                        </label>
++                      ))}
++                    </div>
++                  </div>
++                )}
++              </div>
++              <button
++                type="button"
++                onClick={exportSelectedCategoriesToCsv}
++                disabled={selectedRowsForExport.length === 0}
++                className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
++              >
++                Exportar selecionados
++              </button>
++              <span className="text-xs text-slate-300">
++                {selectedRowsForExport.length} linha(s) para exportacao
++              </span>
++            </>
++          )}
++        </div>
+         <span className="text-xs text-slate-400">{rows.length} linhas visiveis</span>
+       </header>
+ 
+@@ -398,7 +1103,9 @@ function RfTable({
+                 <tr
+                   key={row.id}
+                   className={`absolute left-0 top-0 w-full border-b border-white/5 ${
+-                    isLeaf && onLeafRowClick
++                    isLeaf && divergenceActive && divergentIds.has(row.original.id)
++                      ? 'bg-red-500/20 hover:bg-red-500/25'
++                      : isLeaf && onLeafRowClick
+                       ? 'cursor-pointer hover:bg-brand-500/10'
+                       : 'bg-slate-900/20 hover:bg-slate-800/30'
+                   }`}
+@@ -481,6 +1188,8 @@ export default function CadastroAtivoRF() {
+   const [rightExpanded, setRightExpanded] = useState<ExpandedState>(true);
+   const [leftSorting, setLeftSorting] = useState<SortingState>([]);
+   const [rightSorting, setRightSorting] = useState<SortingState>([]);
++  const [leftColumnVisibility, setLeftColumnVisibility] = useState<ColumnVisibilityState>({});
++  const [rightColumnVisibility, setRightColumnVisibility] = useState<ColumnVisibilityState>({});
+ 
+   const [xpPrefilter, setXpPrefilter] = useState<{ indexer: string; maturityDate: string } | null>(null);
+ 
+@@ -519,6 +1228,14 @@ export default function CadastroAtivoRF() {
+     setRightSorting((current) => applyUpdater(updater, current));
+   };
+ 
++  const onLeftColumnVisibilityChange: OnChangeFn<ColumnVisibilityState> = (updater) => {
++    setLeftColumnVisibility((current) => applyUpdater(updater, current));
++  };
++
++  const onRightColumnVisibilityChange: OnChangeFn<ColumnVisibilityState> = (updater) => {
++    setRightColumnVisibility((current) => applyUpdater(updater, current));
++  };
++
+   const hasBothDatasets = useMemo(
+     () => Array.isArray(beehusRows) && Array.isArray(xpRows),
+     [beehusRows, xpRows],
+@@ -529,7 +1246,12 @@ export default function CadastroAtivoRF() {
+     setErrorBeehus(null);
+     try {
+       const json = await readJsonFile(file);
+-      setBeehusRows(mapBeehusData(json));
++      const mapped = mapBeehusData(json);
++      const keys = collectDatasetKeys(mapped);
++      setBeehusRows(mapped);
++      setLeftColumnVisibility(
++        buildDefaultVisibility(keys, ['category', 'ticker', 'name', 'maturityDate', 'rate', 'indexer']),
++      );
+     } catch (error) {
+       setBeehusRows(null);
+       setErrorBeehus(error instanceof Error ? error.message : 'Falha ao processar Beehus');
+@@ -543,7 +1265,12 @@ export default function CadastroAtivoRF() {
+     setErrorXP(null);
+     try {
+       const json = await readJsonFile(file);
+-      setXpRows(mapXPData(json));
++      const mapped = mapXPData(json);
++      const keys = collectDatasetKeys(mapped);
++      setXpRows(mapped);
++      setRightColumnVisibility(
++        buildDefaultVisibility(keys, ['category', 'ctipseliccode', 'name', 'maturityDate', 'rate', 'indexer']),
++      );
+     } catch (error) {
+       setXpRows(null);
+       setErrorXP(error instanceof Error ? error.message : 'Falha ao processar XP');
+@@ -585,6 +1312,24 @@ export default function CadastroAtivoRF() {
+     setRightColumnFilters((current) => applyPrefilter(current, '', ''));
+   };
+ 
++  const beehusColumns = useMemo(
++    () =>
++      buildColumns(
++        collectDatasetKeys(beehusRows ?? []),
++        ['category', 'ticker', 'name', 'maturityDate', 'rate', 'indexer'],
++      ),
++    [beehusRows],
++  );
++
++  const xpColumns = useMemo(
++    () =>
++      buildColumns(
++        collectDatasetKeys(xpRows ?? []),
++        ['category', 'ctipseliccode', 'name', 'maturityDate', 'rate', 'indexer'],
++      ),
++    [xpRows],
++  );
++
+   return (
+     <Layout>
+       <div className="mx-auto max-w-[1800px] space-y-6 p-8">
+@@ -670,6 +1415,9 @@ export default function CadastroAtivoRF() {
+               onExpandedChange={onLeftExpandedChange}
+               sorting={leftSorting}
+               onSortingChange={onLeftSortingChange}
++              columnVisibility={leftColumnVisibility}
++              onColumnVisibilityChange={onLeftColumnVisibilityChange}
++              enableDivergenceTools
+               onLeafRowClick={handleBeehusRowClick}
+             />
+ 
+@@ -686,6 +1434,10 @@ export default function CadastroAtivoRF() {
+               onExpandedChange={onRightExpandedChange}
+               sorting={rightSorting}
+               onSortingChange={onRightSortingChange}
++              columnVisibility={rightColumnVisibility}
++              onColumnVisibilityChange={onRightColumnVisibilityChange}
++              enableDivergenceTools={false}
++              enableCategoryExport
+             />
+           </section>
+         ) : (
+diff --git a/beehus-web/src/pages/Jobs.tsx b/beehus-web/src/pages/Jobs.tsx
+index ca5fc55..e65de36 100644
+--- a/beehus-web/src/pages/Jobs.tsx
++++ b/beehus-web/src/pages/Jobs.tsx
+@@ -1013,7 +1013,8 @@ export default function Jobs() {
+                                         <option value="itau_onshore_login">Itau Onshore Login</option>
+                                         <option value="itau_offshore_login">Itau Offshore Login</option>
+                                         <option value="btg_onshore_login">BTG Onshore Login</option>
+-                                        <option value="btg_offshore_login">BTG Offshore Login</option>
++                                        <option value="btg_us_login">BTG US Login</option>
++                                        <option value="btg_cayman_login">BTG Cayman Login</option>
+                                         <option value="btg_mfo_login">BTG MFO Login</option>
+                                         <option value="morgan_stanley_login">Morgan Stanley Login</option>
+                                         <option value="jefferies_login">Jefferies Login</option>
+@@ -1071,7 +1072,7 @@ export default function Jobs() {
+                                         </div>
+                                     ) : (
+                                         <>
+-                                            {['jpmorgan_login', 'itau_onshore_login', 'itau_offshore_login', 'btg_onshore_login', 'btg_offshore_login', 'btg_mfo_login', 'morgan_stanley_login', 'jefferies_login'].includes(formData.connector) ? (
++                                            {['jpmorgan_login', 'itau_onshore_login', 'itau_offshore_login', 'btg_onshore_login', 'btg_us_login', 'btg_cayman_login', 'btg_mfo_login', 'morgan_stanley_login', 'jefferies_login'].includes(formData.connector) ? (
+                                                 <div className="space-y-4">
+                                                     {/* Credential Selector */}
+                                                     <div>
+diff --git a/core/connectors/actions/btg_offshore_actions.py b/core/connectors/actions/btg_offshore_actions.py
+deleted file mode 100644
+index e64a592..0000000
+--- a/core/connectors/actions/btg_offshore_actions.py
++++ /dev/null
+@@ -1,491 +0,0 @@
+-"""
+-Actions module for BTG Offshore connector.
+-Encapsulates portal interactions into reusable methods.
+-"""
+-
+-from typing import Callable, Optional
+-from selenium.webdriver.remote.webdriver import WebDriver
+-from selenium.webdriver.common.by import By
+-from selenium.webdriver.common.action_chains import ActionChains
+-from selenium.webdriver.common.keys import Keys
+-from selenium.common.exceptions import TimeoutException
+-import time
+-import random
+-
+-from core.connectors.helpers.selenium_helpers import SeleniumHelpers
+-from core.connectors.seletores.btg_offshore import SeletorBtgOffshore
+-from core.utils.date_utils import get_previous_business_day, get_today
+-
+-
+-class BtgOffshoreActions:
+-    """Encapsulates BTG Offshore portal actions."""
+-
+-    def __init__(
+-        self,
+-        driver: WebDriver,
+-        helpers: SeleniumHelpers,
+-        selectors: SeletorBtgOffshore,
+-        log_func: Callable,
+-    ):
+-        self.driver = driver
+-        self.helpers = helpers
+-        self.sel = selectors
+-        self.log = log_func
+-
+-    def _is_visible(self, locator) -> bool:
+-        elements = self.driver.find_elements(*locator)
+-        return any(el.is_displayed() for el in elements)
+-
+-    def _click_if_visible(self, locator) -> bool:
+-        elements = self.driver.find_elements(*locator)
+-        for el in elements:
+-            if el.is_displayed() and el.is_enabled():
+-                el.click()
+-                return True
+-        return False
+-
+-    def _click_with_fallback(self, locator) -> bool:
+-        try:
+-            self.helpers.click_element(*locator)
+-            return True
+-        except Exception:
+-            pass
+-
+-        try:
+-            elements = self.driver.find_elements(*locator)
+-            for el in elements:
+-                if el.is_displayed():
+-                    self.driver.execute_script("arguments[0].scrollIntoView(true);", el)
+-                    self.driver.execute_script("arguments[0].click();", el)
+-                    return True
+-        except Exception:
+-            pass
+-        return False
+-
+-    def _require_click(self, locator, action_name: str) -> None:
+-        if not self._click_with_fallback(locator):
+-            raise RuntimeError(f"Could not click required BTG element: {action_name}")
+-
+-    def _find_first_visible(self, locators):
+-        for loc in locators:
+-            elements = self.driver.find_elements(*loc)
+-            for el in elements:
+-                if el.is_displayed() and el.is_enabled():
+-                    return el
+-        return None
+-
+-    def _wait_enabled(self, locator, timeout: Optional[int] = None):
+-        el = self.helpers.find_element(*locator)
+-        self.helpers.wait_until(lambda d: el.is_displayed() and el.is_enabled(), timeout=timeout)
+-        return el
+-
+-    def _wait_any_visible(self, locators, timeout_msg: str):
+-        try:
+-            return self.helpers.wait_until(
+-                lambda d: any(
+-                    el.is_displayed()
+-                    for loc in locators
+-                    for el in d.find_elements(*loc)
+-                )
+-            )
+-        except Exception as exc:
+-            raise TimeoutException(timeout_msg) from exc
+-
+-    def _overlay_visible(self) -> bool:
+-        return self._is_visible(self.sel.MODAL_OVERLAY) or self._is_visible(self.sel.GENERIC_OVERLAY)
+-
+-    def _overlay_state(self) -> dict:
+-        return {
+-            "modal": self._is_visible(self.sel.MODAL_OVERLAY),
+-            "generic": self._is_visible(self.sel.GENERIC_OVERLAY),
+-        }
+-
+-    def _remove_generic_overlay_js(self) -> bool:
+-        try:
+-            removed = self.driver.execute_script(
+-                """
+-                const overlays = document.querySelectorAll('div.overlay');
+-                overlays.forEach(o => o.remove());
+-                return overlays.length;
+-                """
+-            )
+-            return bool(removed)
+-        except Exception:
+-            return False
+-
+-    def _wait_overlay_gone(self, timeout_seconds: int = 15) -> bool:
+-        deadline = time.time() + timeout_seconds
+-        while time.time() < deadline:
+-            if not self._overlay_visible():
+-                return True
+-            time.sleep(0.25)
+-        return not self._overlay_visible()
+-
+-    async def dismiss_modal_overlay(self, context: str = "", wait_seconds: int = 15) -> None:
+-        if wait_seconds > 0:
+-            deadline = time.time() + wait_seconds
+-            while time.time() < deadline and not self._overlay_visible():
+-                time.sleep(0.25)
+-        if not self._overlay_visible():
+-            return
+-
+-        suffix = f" ({context})" if context else ""
+-        await self.log(f"INFO Modal overlay detected{suffix}")
+-
+-        for _ in range(3):
+-            if not self._overlay_visible():
+-                return
+-
+-            overlay_state = self._overlay_state()
+-            if overlay_state.get("generic") and not overlay_state.get("modal"):
+-                await self.log("INFO Generic overlay visible, waiting to clear before close")
+-                self._wait_overlay_gone()
+-                if self._overlay_visible():
+-                    if self._remove_generic_overlay_js():
+-                        await self.log("WARN Generic overlay removed via JS fallback")
+-                    return
+-
+-            if overlay_state.get("modal"):
+-                overlays = self.driver.find_elements(*self.sel.MODAL_OVERLAY)
+-                for ov in overlays:
+-                    try:
+-                        btns = ov.find_elements(*self.sel.MODAL_CLOSE_BUTTON)
+-                        for btn in btns:
+-                            if btn.is_displayed() and btn.is_enabled():
+-                                btn.click()
+-                                await self.log("OK Dismissed modal (Close button in overlay)")
+-                                break
+-                    except Exception:
+-                        continue
+-                if not self._overlay_visible():
+-                    return
+-
+-            if self._click_if_visible(self.sel.MODAL_CLOSE_BUTTON):
+-                await self.log("OK Dismissed modal (Close button)")
+-            elif self._click_if_visible(self.sel.MODAL_CLOSE):
+-                await self.log("OK Dismissed modal (Close icon/btn)")
+-            elif self._click_if_visible(self.sel.DONT_SHOW_AGAIN):
+-                await self.log("OK Dismissed modal (Don't show again)")
+-            elif self._click_if_visible(self.sel.MODAL_SKIP):
+-                await self.log("OK Dismissed modal (Skip/Close text)")
+-
+-            time.sleep(1)
+-
+-        if self._overlay_visible():
+-            if self._wait_overlay_gone():
+-                await self.log("OK Modal overlay gone after close")
+-                return
+-
+-        if self._overlay_visible() and self._is_visible(self.sel.GENERIC_OVERLAY):
+-            if self._remove_generic_overlay_js():
+-                await self.log("WARN Generic overlay removed via JS fallback")
+-
+-        if self._overlay_visible():
+-            overlays = self.driver.find_elements(*self.sel.MODAL_OVERLAY)
+-            if overlays:
+-                try:
+-                    self.driver.execute_script("arguments[0].click();", overlays[-1])
+-                    time.sleep(1)
+-                except Exception:
+-                    pass
+-
+-        if self._overlay_visible():
+-            overlays = self.driver.find_elements(*self.sel.GENERIC_OVERLAY)
+-            if overlays:
+-                try:
+-                    self.driver.execute_script("arguments[0].click();", overlays[-1])
+-                    time.sleep(1)
+-                except Exception:
+-                    pass
+-
+-        if self._overlay_visible():
+-            self._wait_overlay_gone()
+-
+-        if self._overlay_visible():
+-            await self.log("WARN Modal overlay still visible after attempts")
+-
+-    # ========== NAVIGATION ==========
+-
+-    async def navigate_to_login(self, url: str) -> None:
+-        await self.log(f"NAVIGATE: {url}")
+-        self.driver.get(url)
+-
+-    async def click_portal_global(self) -> None:
+-        before_handles = set(self.driver.window_handles)
+-        deadline = time.time() + 12
+-        while time.time() < deadline:
+-            el = self._find_first_visible(
+-                [self.sel.PORTAL_GLOBAL_CARD, self.sel.PORTAL_GLOBAL, self.sel.PORTAL_GLOBAL_ALT]
+-            )
+-            if el:
+-                try:
+-                    el.click()
+-                except Exception:
+-                    self.driver.execute_script("arguments[0].scrollIntoView(true);", el)
+-                    self.driver.execute_script("arguments[0].click();", el)
+-                self._switch_to_new_window(before_handles)
+-                await self.log("OK Portal Global clicked")
+-                return
+-
+-            if self._is_visible(self.sel.EMAIL):
+-                await self.log("INFO Global login form visible, skipping Portal Global")
+-                return
+-
+-            time.sleep(0.5)
+-
+-        await self.log("WARN Portal Global not visible after wait, continuing")
+-
+-    def _switch_to_new_window(self, before_handles) -> None:
+-        try:
+-            self.helpers.wait_until(lambda d: len(d.window_handles) > len(before_handles))
+-        except Exception:
+-            return
+-
+-        for handle in self.driver.window_handles:
+-            if handle not in before_handles:
+-                self.driver.switch_to.window(handle)
+-                return
+-
+-    async def wait_for_login_form(self) -> None:
+-        self.helpers.wait_for_visible(*self.sel.EMAIL)
+-        await self.log("OK Login form visible")
+-
+-    # ========== LOGIN ==========
+-
+-    async def fill_credentials(self, email: str, password: str) -> None:
+-        email_input = self.helpers.wait_for_visible(*self.sel.EMAIL)
+-        password_input = self.helpers.wait_for_visible(*self.sel.PASSWORD)
+-
+-        self._type_human(email_input, email)
+-        self._type_human(password_input, password)
+-        await self.log("OK Credentials filled")
+-
+-        sign_in_btn = self._wait_enabled(self.sel.SIGN_IN)
+-        sign_in_btn.click()
+-        await self.log("OK Sign in submitted")
+-
+-    # ========== OTP ==========
+-
+-    async def request_otp(self) -> None:
+-        await self.log("INFO OTP already sent, waiting for user input")
+-
+-    async def wait_for_otp(self, timeout_seconds: int = 240) -> None:
+-        self.helpers.wait_for_element(*self.sel.OTP_CODE)
+-        await self.log("INFO Waiting for OTP entry")
+-
+-        continue_btn = self._wait_enabled(self.sel.OTP_CONTINUE, timeout=timeout_seconds)
+-        continue_btn.click()
+-        await self.log("OK OTP continued")
+-
+-    # ========== ACCESS ==========
+-
+-    async def wait_for_access_screen(self) -> None:
+-        try:
+-            self._wait_any_visible(
+-                [self.sel.COUNTRY_US, self.sel.ACCOUNT_CHECKBOXES],
+-                "Access screen not visible after OTP.",
+-            )
+-            await self.log("OK Access screen visible")
+-        except TimeoutException:
+-            await self.log("WARN Access screen not visible after OTP")
+-
+-    async def select_country_us(self) -> None:
+-        try:
+-            self.helpers.wait_for_visible(*self.sel.COUNTRY_US)
+-            self.helpers.click_element(*self.sel.COUNTRY_US)
+-            await self.log("OK Country selected: United States")
+-        except TimeoutException:
+-            await self.log("WARN Country tab not visible: United States")
+-
+-    async def select_all_accounts(self) -> None:
+-        """Selects all available accounts using JS click for reliability."""
+-        try:
+-            # Try specific "Select All" checkbox first
+-            total_chk = self.driver.find_elements(*self.sel.CHECKBOX_TOTAL)
+-            if total_chk:
+-                self.log("INFO Found Total Checkbox, attempting click...")
+-                # Use JS click as the input might be hidden/overlayed
+-                self.driver.execute_script("arguments[0].click();", total_chk[0])
+-                time.sleep(1) # Wait for UI to update
+-                await self.log("OK Total Checkbox clicked")
+-                return
+-
+-            # Fallback to individual checkboxes
+-            await self.log("INFO Total Checkbox not found, selecting individually")
+-            checkboxes = self.driver.find_elements(*self.sel.ACCOUNT_CHECKBOXES)
+-            clicked_count = 0
+-            for chk in checkboxes:
+-                if not chk.is_selected():
+-                    self.driver.execute_script("arguments[0].click();", chk)
+-                    clicked_count += 1
+-            
+-            if clicked_count > 0:
+-                await self.log(f"OK Selected {clicked_count} individual accounts")
+-            else:
+-                await self.log("INFO No unselected accounts found")
+-
+-        except Exception as e:
+-            await self.log(f"WARN Error selecting accounts: {e}")
+-
+-    async def submit_access(self) -> None:
+-        access_btn = self._wait_enabled(self.sel.ACCESS_BTN)
+-        try:
+-            access_btn.click()
+-        except Exception:
+-            self.driver.execute_script("arguments[0].click();", access_btn)
+-        await self.log("OK Access submitted")
+-        await self.dismiss_modal_overlay("post-access", wait_seconds=6)
+-
+-    # ========== FILTER / EXPORT ==========
+-
+-    async def open_start_date_input(self) -> None:
+-        await self.dismiss_modal_overlay("before start date input")
+-        self._require_click(self.sel.DATE_INPUT, "start date input")
+-        await self.log("OK Start date input opened")
+-
+-    async def select_calendar_date(self, date_str: str) -> None:
+-        day_cell = (By.XPATH, f"//td[@title='{date_str}']")
+-        self._require_click(day_cell, f"calendar day {date_str}")
+-        await self.log(f"OK Date selected: {date_str}")
+-
+-    async def open_check_all_anchor(self) -> None:
+-        if self._click_with_fallback(self.sel.CHECK_ALL_ANCHOR):
+-            await self.log("OK Check all opened")
+-        else:
+-            await self.log("INFO Check all already open or not visible")
+-
+-    async def open_export_options(self) -> None:
+-        self._require_click(self.sel.EXPORT_OPTIONS_BTN, "export options")
+-        await self.log("OK Export options opened")
+-
+-    async def select_export_all(self) -> None:
+-        self._require_click(self.sel.EXPORT_ALL_OPTION, "export all option")
+-        await self.log("OK Export all selected")
+-
+-    async def open_portfolio(self) -> None:
+-        if not self._is_visible(self.sel.SIDEBAR_PORTFOLIO):
+-            self._click_if_visible(self.sel.SIDEBAR_TOGGLE)
+-        self._require_click(self.sel.SIDEBAR_PORTFOLIO, "sidebar portfolio")
+-        await self.log("OK Portfolio opened")
+-
+-    async def click_portfolio_check_all(self) -> None:
+-        self._require_click(self.sel.PORTFOLIO_CHECK_ALL, "portfolio check all")
+-        await self.log("OK Portfolio check all selected")
+-
+-    async def open_filters(self) -> None:
+-        self._require_click(self.sel.FILTERS_BTN, "filters button")
+-        await self.log("OK Filters opened")
+-
+-    async def open_time_period(self) -> None:
+-        self._require_click(self.sel.TIME_PERIOD, "time period")
+-        await self.log("OK Time Period opened")
+-
+-    async def select_custom_period(self) -> None:
+-        self._require_click(self.sel.CUSTOM_PERIOD, "custom period")
+-        await self.log("OK Custom period selected")
+-
+-    async def set_custom_period_dates(self, date_str: str) -> None:
+-        date_inputs = self.driver.find_elements(*self.sel.CUSTOM_DATE_INPUTS)
+-        if len(date_inputs) >= 2:
+-            date_inputs[0].click()
+-            await self.select_calendar_date(date_str)
+-            date_inputs[1].click()
+-            await self.select_calendar_date(date_str)
+-        else:
+-            self._click_with_fallback(self.sel.CUSTOM_DATE_INPUTS)
+-            await self.select_calendar_date(date_str)
+-        await self.log(f"OK Custom period dates set: {date_str}")
+-
+-    async def click_filter(self) -> None:
+-        self._require_click(self.sel.FILTER_BTN, "filter apply")
+-        await self.log("OK Filter applied")
+-
+-    async def click_export(self) -> None:
+-        self._require_click(self.sel.EXPORT_BTN, "export button")
+-        await self.log("OK Export requested")
+-
+-    async def click_download(self) -> None:
+-        self._require_click(self.sel.DOWNLOAD_BTN, "download button")
+-        await self.log("OK Download started")
+-
+-    def _type_human(self, el, value: str) -> None:
+-        el.click()
+-        el.send_keys(Keys.CONTROL, "a")
+-        el.send_keys(Keys.BACKSPACE)
+-        for ch in value:
+-            ActionChains(self.driver).send_keys(ch).perform()
+-            time.sleep(random.uniform(0.03, 0.09))
+-
+-    async def change_custody_to_cayman(self) -> None:
+-        if await self.open_profile_menu():
+-            await self.click_change_custody()
+-            await self.select_cayman_country()
+-            await self.log("OK Changed custody to Cayman Islands")
+-
+-    async def open_profile_menu(self) -> bool:
+-        if self._click_if_visible(self.sel.PROFILE_MENU):
+-            await self.log("OK Profile menu opened")
+-            return True
+-        await self.log("WARN Profile menu not visible")
+-        return False
+-
+-    async def click_change_custody(self) -> None:
+-        self._click_with_fallback(self.sel.CHANGE_CUSTODY)
+-        await self.log("OK Change custody clicked")
+-
+-    async def select_cayman_country(self) -> None:
+-        self._click_with_fallback(self.sel.COUNTRY_CAYMAN)
+-        await self.log("OK Cayman Islands selected")
+-
+-    # ========== LOGOUT ==========
+-
+-    async def logout(self) -> None:
+-        if await self.open_profile_menu():
+-            await self.click_sign_out()
+-            await self.log("OK Signed out")
+-
+-    async def click_sign_out(self) -> None:
+-        self._click_with_fallback(self.sel.SIGN_OUT)
+-        await self.log("OK Sign out clicked")
+-
+-    # ========== EXPORT METHODS ==========
+-
+-    async def export_holdings(self, date: str) -> None:
+-        """
+-        Export holdings/portfolio report.
+-        
+-        Args:
+-            date: Report date in MM/DD/YYYY format (US format)
+-        """
+-        await self.log(f"Exporting holdings for date: {date}")
+-        
+-        # Set date and configure export
+-        await self.open_start_date_input()
+-        await self.select_calendar_date(date)
+-        await self.open_check_all_anchor()
+-        await self.open_export_options()
+-        await self.select_export_all()
+-        await self.open_portfolio()
+-        await self.click_portfolio_check_all()
+-        
+-        await self.log("OK Holdings export completed")
+-
+-    async def export_history(self, date: str) -> None:
+-        """
+-        Export transaction history report.
+-        
+-        Args:
+-            date: Report date in MM/DD/YYYY format (US format)
+-        """
+-        await self.log(f"Exporting history for date: {date}")
+-        
+-        # Set custom period and export
+-        await self.open_filters()
+-        await self.open_time_period()
+-        await self.select_custom_period()
+-        await self.set_custom_period_dates(date)
+-        await self.click_filter()
+-        await self.click_export()
+-        await self.click_download()
+-        
+-        await self.log("OK History export completed")
+diff --git a/core/connectors/conn_btg_offshore.py b/core/connectors/conn_btg_offshore.py
+deleted file mode 100644
+index 4a2fd75..0000000
+--- a/core/connectors/conn_btg_offshore.py
++++ /dev/null
+@@ -1,267 +0,0 @@
+-"""
+-BTG Offshore connector - refactored structure.
+-"""
+-
+-import asyncio
+-import logging
+-from dataclasses import dataclass
+-from datetime import datetime
+-from typing import Dict, Any, Optional
+-
+-from selenium.webdriver.remote.webdriver import WebDriver
+-
+-from core.connectors.base import BaseConnector
+-from core.schemas.messages import ScrapeResult
+-from core.connectors.helpers.selenium_helpers import SeleniumHelpers
+-from core.connectors.seletores.btg_offshore import SeletorBtgOffshore
+-from core.connectors.actions.btg_offshore_actions import BtgOffshoreActions
+-from core.utils.date_utils import get_previous_business_day, get_now, get_today
+-
+-logger = logging.getLogger(__name__)
+-
+-
+-@dataclass
+-class BtgOffshoreCredentials:
+-    """Credentials for BTG Offshore access."""
+-    email: str
+-    password: str
+-
+-
+-class BtgOffshoreConnector(BaseConnector):
+-    """Conector para automacao do portal BTG Offshore."""
+-
+-    @property
+-    def name(self) -> str:
+-        return "btg_offshore_login"
+-
+-    # ========== SETUP E HELPERS ==========
+-
+-    def _make_run_logger(self, logger, run):
+-        async def log(msg: str):
+-            logger.info(f"[BTG Offshore] {msg}")
+-            if run:
+-                timestamped_msg = f"[{get_now().time()}] {msg}"
+-                await run.update({"$push": {"logs": timestamped_msg}})
+-        return log
+-
+-    async def _setup_run(self, params: Dict[str, Any]):
+-        from core.models.mongo_models import Run
+-
+-        run_id = params.get("run_id")
+-        run = await Run.get(run_id) if run_id else None
+-        log = self._make_run_logger(logger, run)
+-
+-        return run, log
+-
+-    def _validate_credentials(self, params: Dict[str, Any]) -> Optional[BtgOffshoreCredentials]:
+-        email = params.get("email") or params.get("username") or params.get("user")
+-        password = params.get("password") or params.get("pass")
+-
+-        if not all([email, password]):
+-            return None
+-
+-        return BtgOffshoreCredentials(email=email, password=password)
+-
+-    def _create_actions(self, driver: WebDriver, log_func) -> BtgOffshoreActions:
+-        helpers = SeleniumHelpers(driver, timeout=50)
+-        selectors = SeletorBtgOffshore()
+-        return BtgOffshoreActions(driver, helpers, selectors, log_func)
+-
+-    def _success_result(self, run_id: Optional[str], email: str) -> ScrapeResult:
+-        return ScrapeResult(
+-            run_id=run_id,
+-            success=True,
+-            data={"message": "Logged in successfully", "user": email},
+-        )
+-
+-    def _error_result(self, run_id: Optional[str], error: str) -> ScrapeResult:
+-        return ScrapeResult(run_id=run_id, success=False, error=error)
+-
+-    def _get_business_day(
+-        self,
+-        region: str = "BR",
+-        state: str = "SP",
+-        days: int = 1,
+-        fmt: str = "%d/%m/%Y",
+-    ) -> str:
+-        """
+-        Obtem o dia util anterior.
+-
+-        Returns:
+-            Data formatada pelo formato informado.
+-        """
+-        previous_day = get_previous_business_day(
+-            ref_date=get_today(),
+-            region=region,
+-            state=state,
+-            days=days,
+-        )
+-        return previous_day.strftime(fmt)
+-
+-    def _parse_report_date(self, date_str: str) -> Optional[str]:
+-        """
+-        Normaliza datas para DD/MM/YYYY.
+-
+-        Aceita DD/MM/YYYY ou YYYY-MM-DD.
+-        """
+-        for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+-            try:
+-                return datetime.strptime(date_str, fmt).strftime("%d/%m/%Y")
+-            except ValueError:
+-                continue
+-        return None
+-
+-    async def _handle_error(
+-        self,
+-        e: Exception,
+-        driver: WebDriver,
+-        run_id: Optional[str],
+-        log_func,
+-        credentials: Optional[BtgOffshoreCredentials] = None,
+-    ) -> ScrapeResult:
+-        error_msg = str(e)
+-        if credentials:
+-            await log_func(
+-                f"ERROR Login failed: {error_msg} (user={credentials.email})"
+-            )
+-        else:
+-            await log_func(f"ERROR Login failed: {error_msg}")
+-
+-        try:
+-            timestamp = get_now().strftime("%Y%m%d_%H%M%S")
+-            screenshot_path = f"/app/artifacts/error_btg_offshore_{timestamp}.png"
+-            driver.save_screenshot(screenshot_path)
+-            await log_func(f"SCREEN Screenshot saved to: {screenshot_path}")
+-        except Exception as ss_e:
+-            await log_func(f"WARN Failed to save screenshot: {ss_e}")
+-
+-        return self._error_result(run_id, error_msg)
+-
+-    # ========== METODO PRINCIPAL ==========
+-
+-    async def scrape(self, driver: WebDriver, params: Dict[str, Any]) -> ScrapeResult:
+-        # Setup
+-        run, log = await self._setup_run(params)
+-        run_id = params.get("run_id")
+-
+-        logger.info(f"Starting BTG Offshore Login with params: {params}")
+-
+-        # Validacao de credenciais
+-        credentials = self._validate_credentials(params)
+-        if not credentials:
+-            error_msg = "Missing credentials - check email and password"
+-            logger.error(error_msg)
+-            await log(f"ERROR {error_msg}")
+-            await log(f"INFO Available params: {list(params.keys())}")
+-            return self._error_result(run_id, error_msg)
+-
+-        # Criar actions
+-        actions = self._create_actions(driver, log)
+-
+-        try:
+-            # ========== FLUXO PRINCIPAL ==========
+-             
+-            # Resolve parameters
+-            export_holdings = params.get('export_holdings', True)
+-            export_history = params.get('export_history', False)
+-
+-            # Initial Date Calculation
+-            holdings_date_us = None
+-            history_date_us = None
+-            holdings_date_ky = None
+-            history_date_ky = None
+-
+-            if export_holdings:
+-                from core.connectors.utils.date_calculator import calculate_holdings_date
+-                holdings_date_us = calculate_holdings_date(params, output_format="%m/%d/%Y")  # US format
+-                holdings_date_ky = calculate_holdings_date(params, output_format="%m/%d/%Y")
+-
+-            if export_history:
+-                from core.connectors.utils.date_calculator import calculate_history_date
+-                history_date_us = calculate_history_date(params, output_format="%m/%d/%Y")  # US format
+-                history_date_ky = calculate_history_date(params, output_format="%m/%d/%Y")
+-
+-            await log(f"DEBUG Params Resolved - Holdings US: {export_holdings} ({holdings_date_us}), History US: {export_history} ({history_date_us})")
+-
+-            # 1. Navegacao e login
+-            await actions.navigate_to_login(SeletorBtgOffshore.URL_BASE)
+-            await actions.click_portal_global()
+-            await actions.wait_for_login_form()
+-            await actions.fill_credentials(credentials.email, credentials.password)
+-            await actions.request_otp()
+-            await actions.wait_for_otp(timeout_seconds=240)
+-
+-            # 2. Acesso (United States)
+-            await actions.wait_for_access_screen()
+-            await actions.select_country_us()
+-            await actions.select_all_accounts()
+-            await actions.submit_access()
+-            await actions.dismiss_modal_overlay("post-access")
+-
+-            # 3. Export Holdings US (if enabled)
+-            if export_holdings and holdings_date_us:
+-                await log(f"INFO Holdings date (US): {holdings_date_us}")
+-                await actions.export_holdings(holdings_date_us)
+-
+-            # 4. Export History US (if enabled)
+-            if export_history and history_date_us:
+-                await log(f"INFO History date (US): {history_date_us}")
+-                await actions.export_history(history_date_us)
+-
+-            # 4. Troca de custodia para Cayman
+-            await actions.change_custody_to_cayman()
+-            await actions.select_all_accounts()
+-            await actions.submit_access()
+-            await actions.dismiss_modal_overlay("post-access")
+-
+-            # 5. Exportacao Cayman (same pattern as US)
+-            if export_holdings and holdings_date_ky:
+-                await log(f"INFO Holdings date (Cayman): {holdings_date_ky}")
+-                await actions.export_holdings(holdings_date_ky)
+-
+-            if export_history and history_date_ky:
+-                await log(f"INFO History date (Cayman): {history_date_ky}")
+-                await actions.export_history(history_date_ky)
+-
+-            # Save report dates to run
+-            if run:
+-                update_data = {}
+-                # Capture US dates (holdings/history) if available
+-                holdings_date = locals().get("holdings_date_us")
+-                history_date = locals().get("history_date_us")
+-                
+-                if holdings_date:
+-                    update_data["report_date"] = holdings_date
+-                if history_date:
+-                    update_data["history_date"] = history_date
+-                
+-                if update_data:
+-                    await run.update({"$set": update_data})
+-            
+-            await log("Sleeping for 10s for visual check.")
+-            await asyncio.sleep(10)
+-
+-            await actions.logout()
+-            return self._success_result(run_id, credentials.email)
+-
+-        except Exception as e:
+-            # Attempt to save dates if they were calculated before error
+-            try:
+-                if run:
+-                    update_data = {}
+-                    holdings_date = locals().get("holdings_date_us")
+-                    history_date = locals().get("history_date_us")
+-                    if holdings_date:
+-                        update_data["report_date"] = holdings_date
+-                    if history_date:
+-                        update_data["history_date"] = history_date
+-                    if update_data:
+-                        await run.update({"$set": update_data})
+-            except Exception:
+-                pass  # Ignore db errors during error handling
+-
+-            try:
+-                await actions.logout()
+-            except Exception:
+-                pass
+-            return await self._handle_error(e, driver, run_id, log, credentials)
+diff --git a/core/connectors/registry.py b/core/connectors/registry.py
+index ee06620..77ad7b5 100644
+--- a/core/connectors/registry.py
++++ b/core/connectors/registry.py
+@@ -19,12 +19,14 @@ class ConnectorRegistry:
+ # Register connectors
+ from core.connectors.conn_jpmorgan import JPMorganConnector
+ from core.connectors.conn_itau_onshore import ItauOnshoreConnector
+-from core.connectors.conn_btg_offshore import BtgOffshoreConnector
++from core.connectors.conn_btg_us import BtgUsConnector
++from core.connectors.conn_btg_cayman import BtgCaymanConnector
+ from core.connectors.conn_jefferies import JefferiesConnector
+ from core.connectors.conn_btg_mfo import BtgMfoConnector
+ 
+ ConnectorRegistry.register(JPMorganConnector)
+ ConnectorRegistry.register(JefferiesConnector)
+ ConnectorRegistry.register(ItauOnshoreConnector)
+-ConnectorRegistry.register(BtgOffshoreConnector)
++ConnectorRegistry.register(BtgUsConnector)
++ConnectorRegistry.register(BtgCaymanConnector)
+ ConnectorRegistry.register(BtgMfoConnector)
+diff --git a/core/connectors/seletores/btg_offshore.py b/core/connectors/seletores/btg_offshore.py
+deleted file mode 100644
+index 7157659..0000000
+--- a/core/connectors/seletores/btg_offshore.py
++++ /dev/null
+@@ -1,64 +0,0 @@
+-from dataclasses import dataclass
+-from selenium.webdriver.common.by import By
+-
+-
+-@dataclass(frozen=True)
+-class SeletorBtgOffshore:
+-    """Selectors for the BTG Offshore portal."""
+-
+-    URL_BASE = "https://app.btgpactual.com/login"
+-
+-    # Login
+-    EMAIL = (By.CSS_SELECTOR, "input#email")
+-    PASSWORD = (By.CSS_SELECTOR, "input#password")
+-    SIGN_IN = (By.XPATH, "//button[normalize-space()='Sign in']")
+-    PORTAL_GLOBAL = (By.CSS_SELECTOR, "fieldset.login__external-link")
+-    PORTAL_GLOBAL_ALT = (By.XPATH, "//p[normalize-space()='Portal Global']")
+-    PORTAL_GLOBAL_CARD = (
+-        By.XPATH,
+-        "//a[.//span[normalize-space()='Portal Global'] or .//p[normalize-space()='Portal Global'] or .//*[normalize-space()='Portal Global']]",
+-    )
+-
+-    # OTP
+-    OTP_CODE = (By.ID, "code")
+-    OTP_CONTINUE = (By.XPATH, "//button[normalize-space()='Continue']")
+-
+-    # Country selection
+-    COUNTRY_US = (By.XPATH, "//div[contains(@class,'orq-tabs__tab')]//span[normalize-space()='United States']")
+-
+-    # Accounts
+-    CHECKBOX_TOTAL = (By.CSS_SELECTOR, "orq-checkbox#Checkbox_TotalAccount input")
+-    ACCOUNT_CHECKBOXES = (By.CSS_SELECTOR, "input[type='checkbox'][aria-label='Checkbox']")
+-    ACCESS_BTN = (By.XPATH, "//button[normalize-space()='Access']")
+-
+-    # Modal
+-    DONT_SHOW_AGAIN = (By.XPATH, "//span[normalize-space()=\"Don't show again\"]")
+-    MODAL_OVERLAY = (By.CSS_SELECTOR, "div.orq-modal__overlay")
+-    MODAL_CLOSE_BUTTON = (By.CSS_SELECTOR, "button.orq-modal__close-button")
+-    MODAL_CLOSE = (By.CSS_SELECTOR, "button[aria-label='Close'], button.close, .icon-close")
+-    MODAL_SKIP = (By.XPATH, "//button[contains(normalize-space(), 'Skip') or contains(normalize-space(), 'Close')]")
+-    GENERIC_OVERLAY = (By.CSS_SELECTOR, "div.overlay.ng-star-inserted, div.overlay")
+-
+-    # Filters / export
+-    DATE_INPUT = (By.CSS_SELECTOR, "input[placeholder*='Data de']")
+-    CHECK_ALL_ANCHOR = (By.CSS_SELECTOR, "a.see-more")
+-    EXPORT_OPTIONS_BTN = (By.XPATH, "//button[.//span[contains(normalize-space(),'Export options')]]")
+-    EXPORT_ALL_OPTION = (By.XPATH, "//div[contains(@class,'menu-expanded')]//div[normalize-space()='Export all']")
+-
+-    SIDEBAR_TOGGLE = (By.CSS_SELECTOR, "button.burguer-menu-button")
+-    SIDEBAR_PORTFOLIO = (By.XPATH, "//button[.//p[normalize-space()='Portfolio']]")
+-    PORTFOLIO_CHECK_ALL = (By.XPATH, "//a[.//span[normalize-space()='Check all']]")
+-
+-    FILTERS_BTN = (By.XPATH, "//button[normalize-space()='Filters']")
+-    TIME_PERIOD = (By.XPATH, "//label[.//span[normalize-space()='Time Period']]")
+-    CUSTOM_PERIOD = (By.XPATH, "//div[contains(@class,'description') and normalize-space()='Custom period']")
+-    CUSTOM_DATE_INPUTS = (By.CSS_SELECTOR, "input[placeholder*='Click and select']")
+-    FILTER_BTN = (By.XPATH, "//button[normalize-space()='Filter']")
+-    EXPORT_BTN = (By.XPATH, "//button[normalize-space()='Export']")
+-    DOWNLOAD_BTN = (By.XPATH, "//button[normalize-space()='Download']")
+-
+-    # Logout
+-    PROFILE_MENU = (By.ID, "menuProfile")
+-    CHANGE_CUSTODY = (By.XPATH, "//div[contains(@class,'header__menu--changeCountry')]//p[normalize-space()='Change custody']")
+-    COUNTRY_CAYMAN = (By.XPATH, "//div[contains(@class,'orq-tabs__tab')]//span[normalize-space()='Cayman Islands']")
+-    SIGN_OUT = (By.XPATH, "//div[contains(@class,'header__menu--signout')]//p[normalize-space()='Sign Out']")
+diff --git a/core/tasks.py b/core/tasks.py
+index fd8a5ab..5f95367 100644
+--- a/core/tasks.py
++++ b/core/tasks.py
+@@ -521,7 +521,8 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
+                     "jefferies_login",
+                     "jpmorgan_login",
+                     "itau_onshore_login",
+-                    "btg_offshore_login",
++                    "btg_us_login",
++                    "btg_cayman_login",
+                 }
+                 if (
+                     result.success

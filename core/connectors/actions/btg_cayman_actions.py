@@ -1,5 +1,5 @@
 """
-Actions module for BTG Offshore connector.
+Actions module for BTG Cayman connector.
 Encapsulates portal interactions into reusable methods.
 """
 
@@ -13,18 +13,17 @@ import time
 import random
 
 from core.connectors.helpers.selenium_helpers import SeleniumHelpers
-from core.connectors.seletores.btg_offshore import SeletorBtgOffshore
-from core.utils.date_utils import get_previous_business_day, get_today
+from core.connectors.seletores.btg_cayman import SeletorBtgCayman
 
 
-class BtgOffshoreActions:
-    """Encapsulates BTG Offshore portal actions."""
+class BtgCaymanActions:
+    """Encapsulates BTG Cayman portal actions."""
 
     def __init__(
         self,
         driver: WebDriver,
         helpers: SeleniumHelpers,
-        selectors: SeletorBtgOffshore,
+        selectors: SeletorBtgCayman,
         log_func: Callable,
     ):
         self.driver = driver
@@ -282,20 +281,20 @@ class BtgOffshoreActions:
     async def wait_for_access_screen(self) -> None:
         try:
             self._wait_any_visible(
-                [self.sel.COUNTRY_US, self.sel.ACCOUNT_CHECKBOXES],
+                [self.sel.COUNTRY_CAYMAN, self.sel.ACCOUNT_CHECKBOXES],
                 "Access screen not visible after OTP.",
             )
             await self.log("OK Access screen visible")
         except TimeoutException:
             await self.log("WARN Access screen not visible after OTP")
 
-    async def select_country_us(self) -> None:
+    async def select_country_cayman(self) -> None:
         try:
-            self.helpers.wait_for_visible(*self.sel.COUNTRY_US)
-            self.helpers.click_element(*self.sel.COUNTRY_US)
-            await self.log("OK Country selected: United States")
+            self.helpers.wait_for_visible(*self.sel.COUNTRY_CAYMAN)
+            self.helpers.click_element(*self.sel.COUNTRY_CAYMAN)
+            await self.log("OK Country selected: Cayman Islands")
         except TimeoutException:
-            await self.log("WARN Country tab not visible: United States")
+            await self.log("WARN Country tab not visible: Cayman Islands")
 
     async def select_all_accounts(self) -> None:
         """Selects all available accounts using JS click for reliability."""
@@ -303,7 +302,7 @@ class BtgOffshoreActions:
             # Try specific "Select All" checkbox first
             total_chk = self.driver.find_elements(*self.sel.CHECKBOX_TOTAL)
             if total_chk:
-                self.log("INFO Found Total Checkbox, attempting click...")
+                await self.log("INFO Found Total Checkbox, attempting click...")
                 # Use JS click as the input might be hidden/overlayed
                 self.driver.execute_script("arguments[0].click();", total_chk[0])
                 time.sleep(1) # Wait for UI to update
@@ -416,26 +415,12 @@ class BtgOffshoreActions:
             ActionChains(self.driver).send_keys(ch).perform()
             time.sleep(random.uniform(0.03, 0.09))
 
-    async def change_custody_to_cayman(self) -> None:
-        if await self.open_profile_menu():
-            await self.click_change_custody()
-            await self.select_cayman_country()
-            await self.log("OK Changed custody to Cayman Islands")
-
     async def open_profile_menu(self) -> bool:
         if self._click_if_visible(self.sel.PROFILE_MENU):
             await self.log("OK Profile menu opened")
             return True
         await self.log("WARN Profile menu not visible")
         return False
-
-    async def click_change_custody(self) -> None:
-        self._click_with_fallback(self.sel.CHANGE_CUSTODY)
-        await self.log("OK Change custody clicked")
-
-    async def select_cayman_country(self) -> None:
-        self._click_with_fallback(self.sel.COUNTRY_CAYMAN)
-        await self.log("OK Cayman Islands selected")
 
     # ========== LOGOUT ==========
 
@@ -489,3 +474,4 @@ class BtgOffshoreActions:
         await self.click_download()
         
         await self.log("OK History export completed")
+

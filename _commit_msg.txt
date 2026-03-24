@@ -1,0 +1,8 @@
+feat: add divergence tools to CadastroAtivoRF and update BTG connectors
+
+- beehus-web/src/pages/CadastroAtivoRF.tsx:
+  - Added full dynamic columns and column visibility toggle.
+  - Implemented divergence rule editor and checking features for RF assets.
+  - Added export capability (CSV and JSON) for selected categories and divergent items.
+- core/connectors/:
+  - Updated BTG US and Cayman connectors (actions, selectors, conn classes) to refine login implementation.

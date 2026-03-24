@@ -3,8 +3,8 @@ from selenium.webdriver.common.by import By
 
 
 @dataclass(frozen=True)
-class SeletorBtgOffshore:
-    """Selectors for the BTG Offshore portal."""
+class SeletorBtgCayman:
+    """Selectors for the BTG Cayman portal."""
 
     URL_BASE = "https://app.btgpactual.com/login"
 
@@ -24,7 +24,7 @@ class SeletorBtgOffshore:
     OTP_CONTINUE = (By.XPATH, "//button[normalize-space()='Continue']")
 
     # Country selection
-    COUNTRY_US = (By.XPATH, "//div[contains(@class,'orq-tabs__tab')]//span[normalize-space()='United States']")
+    COUNTRY_CAYMAN = (By.XPATH, "//div[contains(@class,'orq-tabs__tab')]//span[normalize-space()='Cayman Islands']")
 
     # Accounts
     CHECKBOX_TOTAL = (By.CSS_SELECTOR, "orq-checkbox#Checkbox_TotalAccount input")
@@ -59,6 +59,5 @@ class SeletorBtgOffshore:
 
     # Logout
     PROFILE_MENU = (By.ID, "menuProfile")
-    CHANGE_CUSTODY = (By.XPATH, "//div[contains(@class,'header__menu--changeCountry')]//p[normalize-space()='Change custody']")
-    COUNTRY_CAYMAN = (By.XPATH, "//div[contains(@class,'orq-tabs__tab')]//span[normalize-space()='Cayman Islands']")
     SIGN_OUT = (By.XPATH, "//div[contains(@class,'header__menu--signout')]//p[normalize-space()='Sign Out']")
+

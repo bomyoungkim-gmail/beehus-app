@@ -21,6 +21,7 @@ const UserProfile = lazy(() => import("./pages/UserProfile"));
 const Downloads = lazy(() => import("./pages/Downloads"));
 const ConferenciaAtivo = lazy(() => import("./pages/ConferenciaAtivo"));
 const CadastroAtivoRF = lazy(() => import("./pages/CadastroAtivoRF"));
+const ProcessamentoExcel = lazy(() => import("./pages/ProcessamentoExcel"));
 
 function App() {
   return (
@@ -140,6 +141,15 @@ function App() {
                 }
               />
 
+              <Route
+                path="/processamento-excel"
+                element={
+                  <ProtectedRoute>
+                    <ProcessamentoExcel />
+                  </ProtectedRoute>
+                }
+              />
+
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
@@ -150,3 +160,4 @@ function App() {
 }
 
 export default App;
+

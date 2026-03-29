@@ -37,17 +37,40 @@ class SeletorBtgUs:
     MODAL_CLOSE_BUTTON = (By.CSS_SELECTOR, "button.orq-modal__close-button")
     MODAL_CLOSE = (By.CSS_SELECTOR, "button[aria-label='Close'], button.close, .icon-close")
     MODAL_SKIP = (By.XPATH, "//button[contains(normalize-space(), 'Skip') or contains(normalize-space(), 'Close')]")
-    GENERIC_OVERLAY = (By.CSS_SELECTOR, "div.overlay.ng-star-inserted, div.overlay")
+    GENERIC_OVERLAY = (
+        By.CSS_SELECTOR,
+        "div.overlay.ng-star-inserted, div.overlay, .cdk-overlay-backdrop, .cdk-overlay-backdrop-showing",
+    )
 
     # Filters / export
     DATE_INPUT = (By.CSS_SELECTOR, "input[placeholder*='Data de']")
-    CHECK_ALL_ANCHOR = (By.CSS_SELECTOR, "a.see-more")
-    EXPORT_OPTIONS_BTN = (By.XPATH, "//button[.//span[contains(normalize-space(),'Export options')]]")
-    EXPORT_ALL_OPTION = (By.XPATH, "//div[contains(@class,'menu-expanded')]//div[normalize-space()='Export all']")
+    CHECK_ALL_ANCHOR_SUMMARY = (
+        By.XPATH,
+        "//div[contains(@class,'card-btg')][.//h3[contains(normalize-space(),'Summary of holdings')]]//a[contains(@class,'see-more') and contains(normalize-space(),'Check all')]",
+    )
+    CHECK_ALL_ANCHOR = (
+        By.XPATH,
+        "//div[contains(@class,'card-btg') and not(ancestor::app-history)]//a[contains(@class,'see-more') and contains(normalize-space(),'Check all')]",
+    )
+    EXPORT_OPTIONS_BTN = (
+        By.XPATH,
+        "//button[contains(normalize-space(.), 'Export options') or .//span[contains(normalize-space(.), 'Export options')] or ancestor::div[contains(@class,'expand-btn')]]",
+    )
+    EXPORT_ALL_OPTION = (
+        By.XPATH,
+        "//div[contains(@class,'item') and contains(normalize-space(.), 'Export all')] | //*[self::button or self::div or self::span][contains(normalize-space(.), 'Export all')]",
+    )
 
     SIDEBAR_TOGGLE = (By.CSS_SELECTOR, "button.burguer-menu-button")
     SIDEBAR_PORTFOLIO = (By.XPATH, "//button[.//p[normalize-space()='Portfolio']]")
-    PORTFOLIO_CHECK_ALL = (By.XPATH, "//a[.//span[normalize-space()='Check all']]")
+    PORTFOLIO_CHECK_ALL_ACTIVITIES = (
+        By.XPATH,
+        "//app-title-home[.//h1[contains(normalize-space(),'Activities history')]]//a[contains(@class,'orq-link') and .//span[contains(@class,'orq-link__label') and normalize-space()='Check all']]",
+    )
+    PORTFOLIO_CHECK_ALL = (
+        By.XPATH,
+        "//app-history//a[(.//span[normalize-space()='Check all'] or contains(normalize-space(),'Check all')) and (contains(@class,'orq-link') or contains(@class,'see-more'))]",
+    )
 
     FILTERS_BTN = (By.XPATH, "//button[normalize-space()='Filters']")
     TIME_PERIOD = (By.XPATH, "//label[.//span[normalize-space()='Time Period']]")

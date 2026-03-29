@@ -73,7 +73,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             {!isCollapsed && <span>Scrape Jobs</span>}
           </Link>
-          <div className={`my-2 border-t border-dark-border/70 ${isCollapsed ? 'mx-1' : 'mx-2'}`} />
             <Link to="/runs" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/runs')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Execution History" : ""}>
                 <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 {!isCollapsed && <span>Runs</span>}
@@ -82,6 +81,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             {!isCollapsed && <span>Downloads</span>}
           </Link>
+          <div className={`my-2 border-t border-dark-border/70 ${isCollapsed ? 'mx-1' : 'mx-2'}`} />
           <Link to="/conferencia-ativo" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/conferencia-ativo')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Conferencia Ativo" : ""}>
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-7 8h8a2 2 0 002-2V6a2 2 0 00-2-2h-3.5l-1-1h-3l-1 1H8a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
             {!isCollapsed && <span>Conferencia Ativo</span>}
@@ -89,6 +89,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <Link to="/cadastro-ativo-rf" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/cadastro-ativo-rf')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Cadastro Ativo RF" : ""}>
             <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18M3 17h18"></path></svg>
             {!isCollapsed && <span>Cadastro Ativo RF</span>}
+          </Link>
+          <Link to="/processamento-excel" className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${isActive('/processamento-excel')} ${isCollapsed ? 'justify-center px-2' : ''}`} title={isCollapsed ? "Processamento Excel" : ""}>
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7h18M3 12h18M3 17h18"></path></svg>
+            {!isCollapsed && <span>Processamento Excel</span>}
           </Link>
           <div className={`my-2 border-t border-dark-border/70 ${isCollapsed ? 'mx-1' : 'mx-2'}`} />
           {isAdmin && (

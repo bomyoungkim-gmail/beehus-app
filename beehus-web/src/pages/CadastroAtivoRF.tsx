@@ -12,7 +12,6 @@ import {
 import type {
   ColumnDef,
   ColumnFiltersState,
-  ColumnVisibilityState,
   ExpandedState,
   FilterFn,
   GroupingState,
@@ -38,6 +37,7 @@ type CategoryRule = {
   nameTerms: string;
   tickerTerms: string;
 };
+type ColumnVisibilityState = Record<string, boolean>;
 
 const GLOBAL_DEFAULT_DIVERGENCE_MODE: DivergenceMode = 'or';
 const GLOBAL_DEFAULT_CATEGORY_RULES: Record<string, CategoryRule> = {
@@ -323,34 +323,6 @@ const globalContainsFilter: FilterFn<RFRow> = (row, _columnId, filterValue) => {
 
   return combined.includes(query);
 };
-
-const baseColumns: ColumnDef<RFRow>[] = [
-  {
-    accessorKey: 'name',
-    header: 'Nome',
-    enableGrouping: false,
-  },
-  {
-    accessorKey: 'category',
-    header: 'Tipo/Categoria',
-    enableGrouping: true,
-  },
-  {
-    accessorKey: 'maturityDate',
-    header: 'Vencimento',
-    enableGrouping: false,
-  },
-  {
-    accessorKey: 'rate',
-    header: 'Taxa',
-    enableGrouping: false,
-  },
-  {
-    accessorKey: 'indexer',
-    header: 'Indexador',
-    enableGrouping: false,
-  },
-];
 
 function collectDatasetKeys(rows: RFRow[]): string[] {
   const keySet = new Set<string>();

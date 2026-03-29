@@ -23,7 +23,7 @@ services:
     volumes:
       - .:/app
       - ./artifacts:/app/artifacts
-      - ${DOWNLOADS_DIR:-./downloads}:/downloads
+      - ${HOST_DOWNLOADS_DIR:-./downloads}:/downloads
 
   celery-beat:
     volumes:

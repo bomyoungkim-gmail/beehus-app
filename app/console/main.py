@@ -32,7 +32,7 @@ from app.console.websockets import ConnectionManager
 # Import all routers up-front so startup is deterministic and fast
 # ---------------------------------------------------------------------------
 from app.console.routers import auth, credentials, users, downloads
-from app.console.routers import workspaces, jobs, runs, dashboard, otp, conferencia_ativo
+from app.console.routers import workspaces, jobs, runs, dashboard, otp, conferencia_ativo, processamento_excel
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,7 @@ app.include_router(runs.router)
 app.include_router(dashboard.router)
 app.include_router(otp.router)
 app.include_router(conferencia_ativo.router)
+app.include_router(processamento_excel.router)
 
 
 # ---------------------------------------------------------------------------

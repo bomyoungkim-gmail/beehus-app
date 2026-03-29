@@ -85,9 +85,9 @@ class BtgCaymanConnector(BaseConnector):
     ) -> ScrapeResult:
         error_msg = str(e)
         if credentials:
-            await log_func(f"ERROR Login failed: {error_msg} (user={credentials.email})")
+            await log_func(f"ERROR BTG Cayman flow failed: {error_msg} (user={credentials.email})")
         else:
-            await log_func(f"ERROR Login failed: {error_msg}")
+            await log_func(f"ERROR BTG Cayman flow failed: {error_msg}")
 
         try:
             timestamp = get_now().strftime("%Y%m%d_%H%M%S")
@@ -189,8 +189,4 @@ class BtgCaymanConnector(BaseConnector):
             except Exception:
                 pass
 
-            try:
-                await actions.logout()
-            except Exception:
-                pass
             return await self._handle_error(e, driver, run_id, log, credentials)

@@ -41,7 +41,7 @@ export default function Login() {
       <div className="relative w-full max-w-md p-8 glass rounded-2xl shadow-2xl border border-white/10 mx-4">
         <div className="text-center mb-8">
             <img
-                src="/beehus_branco.png"
+                src="/beehus-logo.svg"
                 alt="Beehus"
                 className="w-72 max-w-full h-auto mx-auto mb-4"
                 onError={(e) => {

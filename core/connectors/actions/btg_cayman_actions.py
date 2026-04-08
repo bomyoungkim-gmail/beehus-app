@@ -264,7 +264,14 @@ class BtgCaymanActions(BtgGlobalActionsBase):
                   for (const el of all) if (el && el.shadowRoot) queue.push(el.shadowRoot);
                 }
 
+                const historyRoots = [];
                 for (const root of roots) {
+                  const nodes = root.querySelectorAll ? root.querySelectorAll('app-history') : [];
+                  for (const node of nodes) historyRoots.push(node);
+                }
+                const scopedRoots = historyRoots.length ? historyRoots : roots;
+
+                for (const root of scopedRoots) {
                   const nodes = root.querySelectorAll ? root.querySelectorAll('button, a, span') : [];
                   for (const el of nodes) {
                     const txt = (el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
@@ -283,6 +290,16 @@ class BtgCaymanActions(BtgGlobalActionsBase):
             return False
 
     async def click_export(self) -> None:
+        await self.dismiss_modal_overlay("before history export (cayman)", wait_seconds=2)
+        # Give the grid one short beat after filter application before export click.
+        time.sleep(1.0)
+
+        try:
+            await super().click_export()
+            return
+        except Exception as exc:
+            await self.log(f"WARN Standard export button unavailable in Cayman flow: {exc}")
+
         if self._click_now_with_fallback(self.sel.EXPORT_ALL_HISTORY_BTN):
             await self.log("OK Export all requested (Cayman)")
             return
@@ -292,5 +309,9 @@ class BtgCaymanActions(BtgGlobalActionsBase):
         raise RuntimeError("Could not click required BTG element: export all (history cayman)")
 
     async def click_download(self) -> None:
-        # Cayman history flow is direct download from "Export all" button.
-        await self.log("OK Download started (Cayman direct export)")
+        try:
+            await super().click_download()
+            return
+        except Exception:
+            # Fallback for Cayman variants where export starts immediately.
+            await self.log("OK Download started (Cayman direct export)")

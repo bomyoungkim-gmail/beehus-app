@@ -61,24 +61,40 @@ def _resolve_credential_password(credential: Credential, execution_params: dict)
     return None, "missing"
 
 
-def _to_ddmmyyyy(value: str | None) -> str | None:
+def _to_ddmmyyyy(value: str | None, *, prefer_month_first: bool = False) -> str | None:
     if not value:
         return None
     s = str(value).strip()
     if not s:
         return None
-    # 19/02/2026 or 19-02-2026
+
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").strftime("%d%m%Y")
+        except ValueError:
+            return None
+
+    # 19/02/2026, 04/02/2026, 19-02-2026 (supports both day/month and month/day)
     m = re.match(r"^(\d{2})[/-](\d{2})[/-](\d{4})$", s)
     if m:
-        return f"{m.group(1)}{m.group(2)}{m.group(3)}"
-    # 2026-02-19
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})$", s)
-    if m:
-        return f"{m.group(3)}{m.group(2)}{m.group(1)}"
-    # 19022026
+        first, second, year = m.group(1), m.group(2), m.group(3)
+        token = f"{first}/{second}/{year}"
+        ordered_formats = ["%m/%d/%Y", "%d/%m/%Y"] if prefer_month_first else ["%d/%m/%Y", "%m/%d/%Y"]
+        for fmt in ordered_formats:
+            try:
+                return datetime.strptime(token, fmt).strftime("%d%m%Y")
+            except ValueError:
+                continue
+
+    # 19022026 / 04022026 / 20260219
     digits = re.sub(r"\D", "", s)
     if len(digits) == 8:
-        return digits
+        ordered_formats = ["%m%d%Y", "%d%m%Y", "%Y%m%d"] if prefer_month_first else ["%d%m%Y", "%m%d%Y", "%Y%m%d"]
+        for fmt in ordered_formats:
+            try:
+                return datetime.strptime(digits, fmt).strftime("%d%m%Y")
+            except ValueError:
+                continue
     return None
 
 
@@ -431,14 +447,18 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
 
                     if original_paths:
                         refreshed_run = await Run.get(run_id)
+                        prefer_month_first_dates = connector_name in {"btg_us_login", "btg_cayman_login"}
+
                         report_date_ddmmyyyy = _to_ddmmyyyy(
                             (refreshed_run.report_date if refreshed_run else None)
                             or execution_params.get("holdings_date")
-                            or execution_params.get("report_date")
+                            or execution_params.get("report_date"),
+                            prefer_month_first=prefer_month_first_dates,
                         )
                         history_date_ddmmyyyy = _to_ddmmyyyy(
                             (refreshed_run.history_date if refreshed_run else None)
-                            or execution_params.get("history_date")
+                            or execution_params.get("history_date"),
+                            prefer_month_first=prefer_month_first_dates,
                         )
                         default_date_ddmmyyyy = report_date_ddmmyyyy or history_date_ddmmyyyy or datetime.now().strftime("%d%m%Y")
 

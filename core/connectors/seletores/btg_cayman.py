@@ -81,7 +81,7 @@ class SeletorBtgCayman:
     DOWNLOAD_BTN = (By.XPATH, "//button[normalize-space()='Download']")
     EXPORT_ALL_HISTORY_BTN = (
         By.XPATH,
-        "//button[normalize-space()='Export all' or .//span[normalize-space()='Export all']]",
+        "//app-history//button[normalize-space()='Export all' or .//span[normalize-space()='Export all']]",
     )
 
     # Logout

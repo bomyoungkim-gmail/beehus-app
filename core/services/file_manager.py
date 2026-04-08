@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -68,6 +69,30 @@ class FileManager:
         return signatures
 
     @staticmethod
+    def _is_file_stable(file_path: str, settle_seconds: float = 1.0) -> bool:
+        """
+        Check whether file size/mtime remain unchanged for a short interval.
+        Prevents capturing files still being finalized by the browser.
+        """
+        try:
+            first = os.stat(file_path)
+            first_sig = (int(first.st_size), int(first.st_mtime_ns))
+            if first_sig[0] <= 0:
+                return False
+        except OSError:
+            return False
+
+        time.sleep(settle_seconds)
+
+        try:
+            second = os.stat(file_path)
+            second_sig = (int(second.st_size), int(second.st_mtime_ns))
+        except OSError:
+            return False
+
+        return first_sig == second_sig
+
+    @staticmethod
     def to_artifact_relative(file_path: str) -> str:
         """
         Convert an absolute file path under artifacts root to relative POSIX path.
@@ -102,8 +127,6 @@ class FileManager:
         Returns:
             Path to captured file in artifacts directory, or None if not found
         """
-        import time
-
         start_time = time.time()
         found_file = None
         downloads_dir = Path(source_dir) if source_dir else FileManager._downloads_dir()
@@ -149,8 +172,14 @@ class FileManager:
                 complete_files = _list_complete_files(default_downloads_dir)
 
             if complete_files:
-                found_file = max(complete_files, key=os.path.getmtime)
-                break
+                stable_candidates = [
+                    path
+                    for path in sorted(complete_files, key=os.path.getmtime, reverse=True)
+                    if FileManager._is_file_stable(path)
+                ]
+                if stable_candidates:
+                    found_file = stable_candidates[0]
+                    break
 
             time.sleep(1)
 
@@ -188,8 +217,6 @@ class FileManager:
         Returns:
             List of captured file paths in artifacts directory.
         """
-        import time
-
         start_time = time.time()
         captured: List[str] = []
         downloads_dir = Path(source_dir) if source_dir else FileManager._downloads_dir()
@@ -235,10 +262,19 @@ class FileManager:
                 complete_files = _list_complete_files(default_downloads_dir)
 
             if complete_files:
+                stable_files = [
+                    path
+                    for path in sorted(complete_files)
+                    if FileManager._is_file_stable(path)
+                ]
+                if not stable_files:
+                    time.sleep(1)
+                    continue
+
                 run_dir = FileManager._artifacts_dir() / run_id / "original"
                 run_dir.mkdir(parents=True, exist_ok=True)
 
-                for found_file in sorted(complete_files):
+                for found_file in stable_files:
                     filename = os.path.basename(found_file)
                     dest_path = run_dir / filename
                     try:

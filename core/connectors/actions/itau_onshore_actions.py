@@ -135,6 +135,168 @@ class ItauOnshoreActions:
                 return True
             except Exception:
                 return False
+
+    def _click_text_deep_here(self, text_options: list[str]) -> bool:
+        """
+        Busca e clica em elemento clicável por texto no contexto atual,
+        incluindo shadow DOM.
+        """
+        try:
+            clicked = self.driver.execute_script(
+                """
+                const targets = (arguments[0] || [])
+                  .map(t => (t || '').toLowerCase().replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim())
+                  .filter(Boolean);
+                if (!targets.length) return false;
+
+                const isVisible = (el) => {
+                  if (!el) return false;
+                  const style = window.getComputedStyle(el);
+                  if (!style) return false;
+                  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                  const r = el.getBoundingClientRect();
+                  return r.width > 0 && r.height > 0;
+                };
+
+                const normalize = (txt) =>
+                  (txt || '').toLowerCase().replace(/\\u00a0/g, ' ').replace(/\\s+/g, ' ').trim();
+
+                const isClickable = (el) => {
+                  if (!el) return false;
+                  if (el.matches('button,a,[role=\"button\"],[ng-click],.button-icon')) return true;
+                  const tag = (el.tagName || '').toLowerCase();
+                  return tag === 'button' || tag === 'a';
+                };
+
+                const roots = [document];
+                while (roots.length) {
+                  const root = roots.pop();
+                  const nodes = root.querySelectorAll('*');
+                  for (const el of nodes) {
+                    if (el.shadowRoot) roots.push(el.shadowRoot);
+                    if (!isClickable(el) || !isVisible(el)) continue;
+
+                    const txt = normalize(el.innerText || el.textContent || '');
+                    if (!targets.some(t => txt.includes(t))) continue;
+
+                    try {
+                      el.scrollIntoView({block: 'center', inline: 'center'});
+                    } catch (_) {}
+
+                    try {
+                      el.click();
+                      return true;
+                    } catch (_) {
+                      try {
+                        el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));
+                        return true;
+                      } catch (_) {}
+                    }
+                  }
+                }
+                return false;
+                """,
+                text_options,
+            )
+            return bool(clicked)
+        except Exception:
+            return False
+
+    def _click_text_in_default_or_iframes(self, text_options: list[str], timeout: int = 20) -> bool:
+        """
+        Busca por texto em janelas/iframes e clica usando varredura profunda
+        (light DOM + shadow DOM) no contexto encontrado.
+        """
+
+        def _search_frames_recursive(depth: int = 0):
+            if depth > 6:
+                return False
+
+            if self._click_text_deep_here(text_options):
+                return True
+
+            frames = self.driver.find_elements(By.CSS_SELECTOR, "iframe,frame")
+            for frame in frames:
+                try:
+                    self.driver.switch_to.frame(frame)
+                except Exception:
+                    continue
+                try:
+                    if _search_frames_recursive(depth + 1):
+                        return True
+                except Exception:
+                    pass
+                try:
+                    self.driver.switch_to.parent_frame()
+                except Exception:
+                    self.driver.switch_to.default_content()
+            return False
+
+        import time
+        end_time = time.time() + timeout
+        while time.time() < end_time:
+            for handle in self.driver.window_handles:
+                try:
+                    self.driver.switch_to.window(handle)
+                    self.driver.switch_to.default_content()
+                except Exception:
+                    continue
+                if _search_frames_recursive(0):
+                    return True
+            time.sleep(0.4)
+
+        try:
+            self.driver.switch_to.default_content()
+        except Exception:
+            pass
+        return False
+
+    def _safe_current_url(self) -> str:
+        try:
+            return self.driver.current_url or ""
+        except Exception:
+            return ""
+
+    async def _wait_for_post_extrato_pix_navigation(
+        self,
+        previous_url: str,
+        previous_handles: set[str],
+        timeout: int = 45,
+    ) -> None:
+        """
+        Após clicar em 'Extrato Pix', aguarda a transição de página/janela
+        antes de procurar o botão 'salvar em pdf'.
+        """
+        await self.log("INFO Fallback: aguardando transicao apos clicar em 'Extrato Pix'...")
+        try:
+            self.helpers.wait_until(
+                lambda d: (
+                    len(d.window_handles) > len(previous_handles)
+                    or ((d.current_url or "") and (d.current_url or "") != previous_url)
+                ),
+                timeout=timeout,
+            )
+            await self.log("INFO Fallback: transicao detectada apos 'Extrato Pix'")
+        except Exception:
+            await self.log(
+                "INFO Fallback: sem mudanca explicita de URL/janela; seguindo para espera de renderizacao"
+            )
+
+        # Se abriu nova janela/aba, prioriza a mais recente.
+        try:
+            handles = self.driver.window_handles
+            if handles:
+                self.driver.switch_to.window(handles[-1])
+                self.driver.switch_to.default_content()
+        except Exception:
+            pass
+
+        try:
+            self.helpers.wait_ready_state(timeout_seconds=20)
+        except Exception:
+            pass
+
+        await asyncio.sleep(1.0)
     
     # ========== NAVEGAÇÃO ==========
     
@@ -231,19 +393,45 @@ class ItauOnshoreActions:
         await self.log("OK Senha enviada")
     
     # ========== MENU E NAVEGAÇÃO INTERNA ==========
+
+    def _is_menu_expanded(self) -> bool:
+        try:
+            menu = self.helpers.wait_for_element(*self.sel.MENU)
+            return (menu.get_attribute("aria-expanded") or "").strip().lower() == "true"
+        except Exception:
+            return False
     
     async def open_menu(self) -> None:
-        """Abre o menu principal (hover)."""
+        """Abre o menu principal garantindo aria-expanded=true."""
         await self.log("Abrindo menu principal...")
-        self.helpers.hover_element(*self.sel.MENU)
-        await self.log("OK Menu aberto")
+        if self._is_menu_expanded():
+            await self.log("INFO Menu ja estava aberto")
+            return
+
+        # Tentativa 1: hover (algumas versões abrem menu por hover).
+        try:
+            self.helpers.hover_element(*self.sel.MENU)
+        except Exception:
+            pass
+
+        if self._is_menu_expanded():
+            await self.log("OK Menu aberto")
+            return
+
+        # Tentativa 2: clique no botão de menu quando aria-expanded=false.
+        for attempt in range(1, 4):
+            clicked = self._click_with_fallback(self.sel.MENU)
+            if clicked and self._is_menu_expanded():
+                await self.log("OK Menu aberto")
+                return
+            await asyncio.sleep(0.4)
+
+        raise RuntimeError("Nao foi possivel abrir menu principal (aria-expanded nao ficou true).")
 
     async def ensure_menu_open(self) -> None:
         """Garante que o menu principal esteja aberto antes de navegar em itens internos."""
         try:
-            menu = self.helpers.wait_for_element(*self.sel.MENU)
-            expanded = (menu.get_attribute("aria-expanded") or "").strip().lower() == "true"
-            if expanded:
+            if self._is_menu_expanded():
                 await self.log("INFO Menu ja estava aberto")
                 return
         except Exception:
@@ -427,12 +615,40 @@ class ItauOnshoreActions:
             return False
         await self.log("OK Fallback: clicou em 'Continuar'")
 
-        if not self._click_in_default_or_iframes(self.sel.EXTRATO_PIX, timeout=30):
+        pre_pix_url = self._safe_current_url()
+        try:
+            pre_pix_handles = set(self.driver.window_handles)
+        except Exception:
+            pre_pix_handles = set()
+
+        clicked_extrato_pix = self._click_in_default_or_iframes(self.sel.EXTRATO_PIX, timeout=60)
+        if not clicked_extrato_pix:
+            await self.log("INFO Fallback: tentativa profunda para localizar 'Extrato Pix' (DOM + shadow + iframes)")
+            clicked_extrato_pix = self._click_text_in_default_or_iframes(["extrato pix"], timeout=30)
+        if not clicked_extrato_pix:
+            await self.log(f"INFO Fallback debug: URL antes de abortar Extrato Pix: {self._safe_current_url()}")
             await self.log("WARN Fallback: nao encontrou botao 'Extrato Pix'")
             return False
         await self.log("OK Fallback: clicou em 'Extrato Pix'")
 
-        if not self._click_in_default_or_iframes(self.sel.SALVAR_PDF, timeout=30):
+        await self._wait_for_post_extrato_pix_navigation(
+            previous_url=pre_pix_url,
+            previous_handles=pre_pix_handles,
+            timeout=45,
+        )
+
+        clicked_salvar_pdf = self._click_in_default_or_iframes(self.sel.SALVAR_PDF, timeout=60)
+        if not clicked_salvar_pdf:
+            await self.log("INFO Fallback: tentativa profunda para localizar 'salvar em pdf' (DOM + shadow + iframes)")
+            clicked_salvar_pdf = self._click_text_in_default_or_iframes(
+                ["salvar em pdf", "salvar pdf"], timeout=30
+            )
+        if not clicked_salvar_pdf:
+            await self.log(f"INFO Fallback debug: URL atual apos Extrato Pix: {self._safe_current_url()}")
+            try:
+                await self.log(f"INFO Fallback debug: Titulo atual apos Extrato Pix: {self.driver.title}")
+            except Exception:
+                pass
             await self.log("WARN Fallback: nao encontrou botao 'salvar em pdf'")
             return False
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
 
@@ -179,7 +179,6 @@ export default function ConferenciaAtivo() {
       pushLog('Enviando arquivo para o backend...');
 
       const response = await axios.post(url, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         responseType: 'blob',
         timeout: 0,
       });
@@ -201,6 +200,16 @@ export default function ConferenciaAtivo() {
       showToast(`Processamento concluido (${rowCount} linhas). Download iniciado.`, 'success');
     } catch (error) {
       console.error('Conferencia ativo processing failed:', error);
+      if (error instanceof AxiosError && error.response?.data instanceof Blob) {
+        try {
+          const raw = await error.response.data.text();
+          const parsed = JSON.parse(raw);
+          const detail = typeof parsed?.detail === 'string' ? parsed.detail : raw;
+          pushLog(`Erro backend: ${detail}`);
+        } catch {
+          // Ignore parsing issues and keep fallback flow.
+        }
+      }
       pushLog('Falha na requisicao principal. Tentando recuperar resultado...');
       try {
         await recoverResultWithRetry(traceId);

@@ -25,7 +25,11 @@ class SeletorItauOnshore:
     KEYBOARD_DIGIT = (By.CSS_SELECTOR, "button.it-auth-keyboard__digit:not(.it-auth-keyboard__digit--remove)")
     
     # === MENU - Navegação Principal ===
-    MENU = (By.CSS_SELECTOR, "a.btn-nav.btn-menu.btn-menubg[onclick*='header:menu']")
+    MENU = (
+        By.CSS_SELECTOR,
+        "a.btn-nav.btn-menu.btn-menubg, "
+        "a[aria-expanded][class*='btn-menu'][class*='btn-menubg']",
+    )
     POSICAO_DIARIA = (By.XPATH, "//a[contains(@data-op,'pf-posicao-diaria-investimentos')]")
     CONTA_CORRENTE = (By.XPATH, "//a[normalize-space()='conta corrente']")
     EXTRATO = (By.XPATH, "//a[contains(@aria-label,'extrato') or normalize-space()='extrato']")
@@ -41,11 +45,25 @@ class SeletorItauOnshore:
     CONTINUAR = (By.XPATH, "//a[contains(@href,'pegaRadio') or .//img[contains(@alt,'Continuar')]]")
     EXTRATO_PIX = (
         By.XPATH,
-        "//button[.//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'extrato pix')]]",
+        "//*[self::button or self::a]["
+        "contains("
+        "translate(normalize-space(translate(., '\u00A0', ' ')), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'),"
+        "'extrato pix'"
+        ")"
+        "]",
     )
     SALVAR_PDF = (
         By.XPATH,
-        "//button[.//*[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'salvar em pdf')]]",
+        "//*[self::button or self::a]["
+        "contains("
+        "translate(normalize-space(translate(., '\u00A0', ' ')), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'),"
+        "'salvar em pdf'"
+        ")"
+        " or contains("
+        "translate(normalize-space(translate(., '\u00A0', ' ')), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'),"
+        "'salvar pdf'"
+        ")"
+        "]",
     )
     
     # === REPORTS - Relatórios ===

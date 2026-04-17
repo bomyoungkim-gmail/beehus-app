@@ -24,51 +24,28 @@
 
 ### Windows Development Setup
 
-**⚠️ Windows Users**: Due to a known incompatibility between Windows Docker Desktop and Vite's Hot Module Replacement (HMR), the frontend must be run **natively on Windows** for development.
+The Docker setup is consolidated in `docker-compose.yml`, including the frontend service.
 
 **Setup:**
 
-1. Start backend services only:
+1. Start all services:
    ```bash
-   docker compose up -d
+   docker compose up --build -d
    ```
-2. In a separate terminal, run the frontend natively:
-
-   ```bash
-   cd beehus-web
-   npm install  # First time only
-   npm run dev
-   ```
-
-3. Access the application at:
+2. Access the application at:
    - **Frontend**: http://localhost:5173
    - **Backend API**: http://localhost:8000/docs
 
-**Note**: For production deployment, the full Docker Compose setup (including frontend) works correctly. This limitation only affects Windows development.
+**Optional (native frontend fallback):**
 
-**Troubleshooting Port 5173 Conflicts:**
+If you prefer running Vite natively on Windows, stop only the frontend container and run it locally:
 
-If you see `ERR_CONNECTION_RESET` errors even with native frontend:
-
-1. Ensure Docker frontend is fully stopped:
-
-   ```bash
-   docker compose down
-   docker ps -a --filter "name=frontend"  # Should show nothing
-   docker rm -f beehus-app-frontend-1  # If container still exists
-   ```
-
-2. Restart only backend:
-
-   ```bash
-   docker compose up -d
-   ```
-
-3. Stop and restart your native frontend:
-   ```bash
-   # In the terminal running npm run dev, press Ctrl+C
-   npm run dev
-   ```
+```bash
+docker compose stop frontend
+cd beehus-web
+npm install
+npm run dev
+```
 
 ---
 
@@ -91,12 +68,12 @@ Below is a breakdown of each container and its role in the platform:
 
 ### Frontend (`.env` or Docker env)
 
-| Variable            | Description                                                | Default                 |
-| :------------------ | :--------------------------------------------------------- | :---------------------- |
-| `VITE_API_URL`      | URL of the Backend API (accessible from browser)           | `http://localhost:8000` |
-| `VITE_VNC_URL_BASE` | Base URL used to build Selenium/worker VNC endpoints       | `http://localhost`      |
-| `VITE_VNC_HOST_PORT_BASE` | Base public host port for VNC mapping                | `17901`                 |
-| `VITE_VNC_PASSWORD` | Password for VNC connection (must match `SE_VNC_PASSWORD`) | `secret`                |
+| Variable                  | Description                                                | Default                 |
+| :------------------------ | :--------------------------------------------------------- | :---------------------- |
+| `VITE_API_URL`            | URL of the Backend API (accessible from browser)           | `http://localhost:8000` |
+| `VITE_VNC_URL_BASE`       | Base URL used to build Selenium/worker VNC endpoints       | `http://localhost`      |
+| `VITE_VNC_HOST_PORT_BASE` | Base public host port for VNC mapping                      | `17901`                 |
+| `VITE_VNC_PASSWORD`       | Password for VNC connection (must match `SE_VNC_PASSWORD`) | `secret`                |
 
 ### Backend (`.env`)
 
@@ -128,6 +105,7 @@ Access [http://localhost:5173](http://localhost:5173) to:
 - **Downloads & Reports:** Access downloaded and processed files via the "Downloads" page.
   - Reprocessed outputs keep version history and the newest processed file is marked as `Latest`.
 - **Credential Processors:** Configure per-credential file processing scripts with version history.
+- **Processamento Automatizado:** Processamento em lote por upload de pastas ou por caminhos no servidor (allowlist), com opcao de sandbox Docker.
 - **Collapsible Sidebar:** Toggle the sidebar to maximize screen real estate.
 
 ### 2. Monitor Tasks (CLI)
@@ -200,6 +178,40 @@ Use these endpoints when a run requires manual processing selection:
 - `GET /downloads/{run_id}/processing/excel-options?filename=...`
 - `POST /downloads/{run_id}/processing/select-sheet`
 - `POST /downloads/{run_id}/processing/process` (manual reprocess with versioned output)
+
+### Automated Folder Processing Endpoints
+
+- `GET /processamento-automatizado/sandbox-health`
+  - valida disponibilidade do Docker e (opcionalmente) executa `docker pull` da imagem configurada
+  - query params: `sandbox_mode`, `pull_image`, `timeout_seconds`
+- `POST /processamento-automatizado/process`
+  - multipart upload de arquivos organizados por pasta relativa
+  - query params: `timeout_seconds`, `sandbox_mode=none|docker`
+- `POST /processamento-automatizado/process-server-paths`
+  - body JSON: `folder_paths[]`, `timeout_seconds`, `sandbox_mode=none|docker`, `write_to_source=true|false`
+  - valida cada caminho com allowlist de seguranca (`AUTOMATED_PROCESSING_SERVER_ALLOWLIST`)
+  - com `write_to_source=true`, os arquivos processados tambem permanecem na pasta de origem no servidor
+
+Status por pasta:
+
+- cada pasta incluida recebe status de execucao (`success` ou `failed`),
+- em falhas, o retorno `detail.errors` inclui `folder`, `status` e `error`,
+- em sucesso, o `processing_report.json` dentro do ZIP inclui `folder_statuses`.
+
+Sandbox Docker (opcional):
+
+- Configure `AUTOMATED_PROCESSING_SANDBOX_IMAGE` com uma imagem restrita contendo as dependencias do script.
+- O runner aplica `--network none`, limite de CPU/memoria/PIDs e `no-new-privileges`.
+- Ajuste `AUTOMATED_PROCESSING_SANDBOX_HEALTH_TIMEOUT` para controlar timeout de health-check/pull.
+
+Imagem customizada recomendada (padrao):
+
+```bash
+docker build -f docker/Dockerfile.automated-processing-sandbox -t beehus-automated-processing-sandbox:latest .
+```
+
+- O valor padrao em `.env.example` para `AUTOMATED_PROCESSING_SANDBOX_IMAGE` e `beehus-automated-processing-sandbox:latest`.
+- Se o `docker pull` dessa tag falhar, o health-check aceita a imagem local caso ela ja exista no host Docker.
 
 ### 4. Configure OTP
 

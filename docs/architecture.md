@@ -525,9 +525,9 @@ DATABASE_ENCRYPTION_KEY=<32-byte-base64-string>
 
 ### Windows Development
 
-- Frontend deve rodar nativamente (não no Docker)
+- Frontend pode rodar no Docker via `docker compose up -d`
 - Backend roda normalmente no Docker
-- Usar `docker-compose.override.yml` para hot-reload
+- Se preferir desenvolvimento nativo do frontend, use `docker compose stop frontend` e execute Vite localmente
 
 ### Debugging
 

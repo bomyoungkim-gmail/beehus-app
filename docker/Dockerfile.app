@@ -1,3 +1,5 @@
+FROM docker:27.5.1-cli AS docker-cli
+
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -7,6 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     netcat-traditional \
     && rm -rf /var/lib/apt/lists/*
+
+# Docker CLI is required by sandbox execution mode.
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
 # Install Python dependencies
 COPY requirements.txt /app/

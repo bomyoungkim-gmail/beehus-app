@@ -32,7 +32,16 @@ from app.console.websockets import ConnectionManager
 # Import all routers up-front so startup is deterministic and fast
 # ---------------------------------------------------------------------------
 from app.console.routers import auth, credentials, users, downloads
-from app.console.routers import workspaces, jobs, runs, dashboard, otp, conferencia_ativo, processamento_excel
+from app.console.routers import (
+    workspaces,
+    jobs,
+    runs,
+    dashboard,
+    otp,
+    conferencia_ativo,
+    processamento_excel,
+    processamento_automatizado,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +120,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "Content-Type"],
 )
 
 # Register all routers
@@ -125,6 +135,7 @@ app.include_router(dashboard.router)
 app.include_router(otp.router)
 app.include_router(conferencia_ativo.router)
 app.include_router(processamento_excel.router)
+app.include_router(processamento_automatizado.router)
 
 
 # ---------------------------------------------------------------------------

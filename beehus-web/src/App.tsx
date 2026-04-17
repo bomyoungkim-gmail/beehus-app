@@ -21,7 +21,9 @@ const UserProfile = lazy(() => import("./pages/UserProfile"));
 const Downloads = lazy(() => import("./pages/Downloads"));
 const ConferenciaAtivo = lazy(() => import("./pages/ConferenciaAtivo"));
 const CadastroAtivoRF = lazy(() => import("./pages/CadastroAtivoRF"));
-const ProcessamentoExcel = lazy(() => import("./pages/ProcessamentoExcel"));
+const ProcessamentoAutomatizado = lazy(
+  () => import("./pages/ProcessamentoAutomatizado"),
+);
 
 function App() {
   return (
@@ -142,10 +144,10 @@ function App() {
               />
 
               <Route
-                path="/processamento-excel"
+                path="/processamento-automatizado"
                 element={
                   <ProtectedRoute>
-                    <ProcessamentoExcel />
+                    <ProcessamentoAutomatizado />
                   </ProtectedRoute>
                 }
               />
@@ -160,4 +162,3 @@ function App() {
 }
 
 export default App;
-

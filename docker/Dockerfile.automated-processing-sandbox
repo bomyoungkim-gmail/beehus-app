@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /sandbox
+
+COPY docker/requirements.automated-processing-sandbox.txt /tmp/requirements.automated-processing-sandbox.txt
+
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install -r /tmp/requirements.automated-processing-sandbox.txt
+
+CMD ["python", "--version"]

@@ -40,7 +40,8 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-adminpass}
-    # Ports removed for security (exposed in override only)
+    ports:
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -58,7 +59,9 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
-    # Ports removed for security (exposed in override only)
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
     networks:
       - scrape-net
     healthcheck:
@@ -70,7 +73,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: always
-    # Ports removed for security (exposed in override only)
+    ports:
+      - "127.0.0.1:6379:6379"
     networks:
       - scrape-net
 
@@ -173,7 +177,10 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
     env_file: *app-env-file
+    environment:
+      - AUTOMATED_PROCESSING_SANDBOX_IMAGE=${AUTOMATED_PROCESSING_SANDBOX_IMAGE:-beehus-automated-processing-sandbox:latest}
     depends_on:
       mongo:
         condition: service_healthy
@@ -183,16 +190,17 @@ services:
       - scrape-net
 
   frontend:
-    build: 
+    build:
       context: ./beehus-web
       dockerfile: Dockerfile
     working_dir: /app
-    command: sh -c "npm run dev -- --host --force"
+    command: sh -c "npm run dev -- --host"
+    restart: unless-stopped
     volumes:
       - ./beehus-web:/app
       - /app/node_modules
     ports:
-      - "5173:5173"  # Same port inside/outside - no confusion!
+      - "5173:5173" # Same port inside/outside - no confusion!
     environment:
       - VITE_API_URL=${VITE_API_URL:-http://127.0.0.1:8000}
       - VITE_VNC_URL_BASE=${VITE_VNC_URL_BASE:-http://localhost}
@@ -202,7 +210,6 @@ services:
       - app-console
     networks:
       - scrape-net
-
 
 volumes:
   mongo_data:

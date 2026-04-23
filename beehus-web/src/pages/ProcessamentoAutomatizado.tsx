@@ -16,6 +16,11 @@ type FolderEntry = {
   relativePath: string;
 };
 
+type CollectedRootEntries = {
+  entries: FolderEntry[];
+  ignoredDirectories: number;
+};
+
 type FolderUpload = {
   id: string;
   displayName: string;
@@ -81,6 +86,23 @@ type SandboxHealthResponse = {
   message: string;
 };
 
+async function countRootSubdirectories(
+  directoryHandle: FileSystemDirectoryHandle,
+): Promise<number> {
+  let count = 0;
+  const directoryHandleWithEntries = directoryHandle as unknown as {
+    entries: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+  };
+
+  for await (const [, entry] of directoryHandleWithEntries.entries()) {
+    if (entry.kind === "directory") {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
 function timestamped(message: string): string {
   const now = new Date();
   const hh = String(now.getHours()).padStart(2, "0");
@@ -115,8 +137,9 @@ function bytesLabel(value: number): string {
 async function collectEntriesFromDirectoryHandle(
   directoryHandle: FileSystemDirectoryHandle,
   prefix = "",
-): Promise<FolderEntry[]> {
+): Promise<CollectedRootEntries> {
   const out: FolderEntry[] = [];
+  let ignoredDirectories = 0;
   const directoryHandleWithEntries = directoryHandle as unknown as {
     entries: () => AsyncIterableIterator<[string, FileSystemHandle]>;
   };
@@ -127,10 +150,12 @@ async function collectEntriesFromDirectoryHandle(
       const file = await fileHandle.getFile();
       const relativePath = prefix ? `${prefix}/${file.name}` : file.name;
       out.push({ file, relativePath });
+      continue;
     }
+    ignoredDirectories += 1;
   }
 
-  return out;
+  return { entries: out, ignoredDirectories };
 }
 
 async function parseFolderHandleSelection(
@@ -585,6 +610,9 @@ export default function ProcessamentoAutomatizado() {
   const [processedFiles, setProcessedFiles] = useState<ProcessedFileRecord[]>(
     [],
   );
+  const [rootSubfolderCounts, setRootSubfolderCounts] = useState<
+    Record<string, number>
+  >({});
   const [logs, setLogs] = useState<string[]>([]);
   const selectionTargetFolderIdRef = useRef<string | null>(null);
   const { showToast } = useToast();
@@ -612,6 +640,40 @@ export default function ProcessamentoAutomatizado() {
     }
     void savePersistedFolders(folders);
   }, [folders, foldersLoadedFromStorage]);
+
+  useEffect(() => {
+    const activeFolderIds = new Set(folders.map((folder) => folder.id));
+    setRootSubfolderCounts((prev) => {
+      const next: Record<string, number> = {};
+      let changed = false;
+      for (const [id, count] of Object.entries(prev)) {
+        if (activeFolderIds.has(id)) {
+          next[id] = count;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+
+    for (const folder of folders) {
+      if (rootSubfolderCounts[folder.id] !== undefined) {
+        continue;
+      }
+      void (async () => {
+        const count = await countRootSubdirectories(folder.directoryHandle);
+        setRootSubfolderCounts((prev) => {
+          if (prev[folder.id] !== undefined) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [folder.id]: count,
+          };
+        });
+      })();
+    }
+  }, [folders, rootSubfolderCounts]);
 
   useEffect(() => {
     return () => {
@@ -732,10 +794,24 @@ export default function ProcessamentoAutomatizado() {
             : current,
         ),
       );
+      void (async () => {
+        const count = await countRootSubdirectories(folder.directoryHandle);
+        setRootSubfolderCounts((prev) => ({
+          ...prev,
+          [targetFolderId]: count,
+        }));
+      })();
       return;
     }
 
     setFolders((prev) => [...prev, folder]);
+    void (async () => {
+      const count = await countRootSubdirectories(folder.directoryHandle);
+      setRootSubfolderCounts((prev) => ({
+        ...prev,
+        [folder.id]: count,
+      }));
+    })();
   };
 
   const trySelectFolderWithDirectoryPicker = async (
@@ -791,6 +867,14 @@ export default function ProcessamentoAutomatizado() {
 
   const removeFolder = (id: string) => {
     setFolders((prev) => prev.filter((folder) => folder.id !== id));
+    setRootSubfolderCounts((prev) => {
+      if (!(id in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   const validateFolders = (): string | null => {
@@ -910,9 +994,15 @@ export default function ProcessamentoAutomatizado() {
           );
         }
 
-        const entries = await collectEntriesFromDirectoryHandle(
+        const collected = await collectEntriesFromDirectoryHandle(
           folder.directoryHandle,
         );
+        const entries = collected.entries;
+        if (collected.ignoredDirectories > 0) {
+          pushLog(
+            `Pasta ${folder.displayName}: ${collected.ignoredDirectories} subpasta(s) ignorada(s); somente arquivos da raiz sao considerados.`,
+          );
+        }
         if (entries.length === 0) {
           throw new Error(`A pasta ${folder.displayName} esta vazia.`);
         }
@@ -1128,6 +1218,12 @@ export default function ProcessamentoAutomatizado() {
                       <p className="text-xs text-slate-500 break-all">
                         Caminho: {folder.displayPath}
                       </p>
+                      {(rootSubfolderCounts[folder.id] || 0) > 0 && (
+                        <p className="text-xs text-amber-300 mt-1">
+                          Aviso: {rootSubfolderCounts[folder.id]} subpasta(s)
+                          na raiz serao ignoradas no processamento.
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <button

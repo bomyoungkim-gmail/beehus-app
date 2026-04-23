@@ -101,7 +101,10 @@ class JPMorganConnector(BaseConnector):
         log_func,
         credentials: Optional[JPMorganCredentials] = None,
     ) -> ScrapeResult:
-        error_msg = str(e)
+        error_details = str(e).strip()
+        if not error_details:
+            error_details = repr(e)
+        error_msg = f"{type(e).__name__}: {error_details}"
         if credentials:
             await log_func(f"ERROR JPMorgan failure for user {credentials.username}: {error_msg}")
         else:

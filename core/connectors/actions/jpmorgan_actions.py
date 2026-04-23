@@ -1,8 +1,11 @@
 import asyncio
 from typing import Callable, Optional
 
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from core.connectors.helpers.selenium_helpers import SeleniumHelpers
 from core.connectors.seletores.jpmorgan import SeletorJPMorgan
@@ -20,6 +23,88 @@ class JPMorganActions:
         self.helpers = helpers
         self.sel = selectors
         self.log = log_func
+
+    def _discover_frame_paths(self, max_depth: int = 3) -> list[list[int]]:
+        paths: list[list[int]] = [[]]
+        self.driver.switch_to.default_content()
+
+        def walk(current_path: list[int], depth: int) -> None:
+            if depth >= max_depth:
+                return
+            try:
+                frame_count = len(self.driver.find_elements(By.CSS_SELECTOR, "iframe, frame"))
+            except Exception:
+                return
+
+            for idx in range(frame_count):
+                next_path = current_path + [idx]
+                paths.append(next_path)
+                try:
+                    self.driver.switch_to.frame(idx)
+                except Exception:
+                    continue
+                walk(next_path, depth + 1)
+                try:
+                    self.driver.switch_to.parent_frame()
+                except Exception:
+                    self.driver.switch_to.default_content()
+                    for parent_idx in current_path:
+                        try:
+                            self.driver.switch_to.frame(parent_idx)
+                        except Exception:
+                            break
+
+        walk([], 0)
+        self.driver.switch_to.default_content()
+        return paths
+
+    def _switch_to_frame_path(self, frame_path: list[int]) -> bool:
+        try:
+            self.driver.switch_to.default_content()
+            for idx in frame_path:
+                self.driver.switch_to.frame(idx)
+            return True
+        except Exception:
+            self.driver.switch_to.default_content()
+            return False
+
+    def _click_locator_in_current_context(self, locator, timeout_seconds: int) -> bool:
+        by, value = locator
+
+        if by == By.CSS_SELECTOR:
+            try:
+                shadow_element = self.helpers._find_element_maybe_shadow(by, value, timeout=timeout_seconds)
+                WebDriverWait(self.driver, timeout_seconds).until(
+                    lambda d: shadow_element.is_displayed() and shadow_element.is_enabled()
+                )
+                shadow_element.click()
+                return True
+            except Exception:
+                pass
+
+        try:
+            element = WebDriverWait(self.driver, timeout_seconds).until(
+                EC.element_to_be_clickable(locator)
+            )
+            element.click()
+            return True
+        except Exception:
+            return False
+
+    def _try_click_any(self, locators, timeout_seconds: int = 8) -> bool:
+        frame_paths = self._discover_frame_paths(max_depth=3)
+        try:
+            for frame_path in frame_paths:
+                if not self._switch_to_frame_path(frame_path):
+                    continue
+
+                for locator in locators:
+                    if self._click_locator_in_current_context(locator, timeout_seconds):
+                        return True
+        finally:
+            self.driver.switch_to.default_content()
+
+        return False
 
     def _is_system_requirements_page(self) -> bool:
         title = (self.driver.title or "").lower()
@@ -50,6 +135,58 @@ class JPMorganActions:
         if "simplerauth" in url or "recognizeuser" in url:
             return True
         return self._is_element_present(self.sel.MFA_DROPDOWN)
+
+    async def _log_page_context(self, stage: str) -> None:
+        try:
+            current_url = self.driver.current_url or "-"
+        except Exception:
+            current_url = "-"
+
+        try:
+            title = self.driver.title or "-"
+        except Exception:
+            title = "-"
+
+        await self.log(f"DEBUG {stage} page context: url={current_url} title={title}")
+
+    async def _log_positions_locator_state(self, stage: str) -> None:
+        try:
+            investments = len(self.driver.find_elements(*self.sel.MENU_INVESTMENTS))
+            positions = len(self.driver.find_elements(*self.sel.MENU_POSITIONS))
+            accounts = len(self.driver.find_elements(*self.sel.ACCOUNTS_DROPDOWN))
+            tax_lots = len(self.driver.find_elements(*self.sel.SHOW_ALL_TAX_LOTS))
+            await self.log(
+                "DEBUG "
+                f"{stage} locator counts: "
+                f"investments={investments} positions={positions} "
+                f"accounts={accounts} tax_lots={tax_lots}"
+            )
+        except Exception as exc:
+            await self.log(
+                "WARN "
+                f"{stage} locator state unavailable: "
+                f"{exc.__class__.__name__}: {exc}"
+            )
+
+    async def _click_with_stale_retry(self, locator, label: str, retries: int = 3) -> None:
+        by, value = locator
+        for attempt in range(1, retries + 1):
+            try:
+                self.helpers.click_element(by, value)
+                if attempt > 1:
+                    await self.log(f"OK {label} click succeeded on retry {attempt}/{retries}")
+                return
+            except StaleElementReferenceException as exc:
+                await self.log(
+                    "WARN "
+                    f"{label} stale element on attempt {attempt}/{retries} "
+                    f"(locator={by}={value}): {exc}"
+                )
+                await self._log_page_context(f"{label} stale attempt {attempt}/{retries}")
+                await self._log_positions_locator_state(f"{label} stale attempt {attempt}/{retries}")
+                if attempt >= retries:
+                    raise
+                await asyncio.sleep(0.4 * attempt)
 
     def _build_container_user_agent(self) -> Optional[str]:
         caps = getattr(self.driver, "capabilities", {}) or {}
@@ -385,18 +522,56 @@ class JPMorganActions:
 
     async def open_positions(self) -> None:
         await self.log("Opening Positions...")
-        self.helpers.click_element(*self.sel.MENU_POSITIONS)
+        await self._log_page_context("Before opening Positions")
+        await self._log_positions_locator_state("Before opening Positions")
+        await self._click_with_stale_retry(self.sel.MENU_POSITIONS, "Positions menu")
+        await self.log("DEBUG Positions menu click dispatched")
+        try:
+            self.helpers.wait_until(
+                lambda d: (
+                    len(d.find_elements(*self.sel.ACCOUNTS_DROPDOWN)) > 0
+                    or len(d.find_elements(*self.sel.SHOW_ALL_TAX_LOTS)) > 0
+                ),
+                timeout=25,
+            )
+        except Exception as exc:
+            await self.log(
+                "WARN "
+                f"Positions loaded without account controls: {exc.__class__.__name__}: {exc}"
+            )
+        await self._log_positions_locator_state("After opening Positions")
         await self.log("OK Positions opened")
 
     async def select_all_accounts(self) -> None:
         await self.log("Selecting all eligible accounts...")
-        self.helpers.click_element(*self.sel.ACCOUNTS_DROPDOWN)
-        self.helpers.click_element(*self.sel.ACCOUNTS_ALL_ELIGIBLE)
-        await self.log("OK Accounts selected")
+        dropdown_locators = [
+            self.sel.ACCOUNTS_DROPDOWN,
+            (By.CSS_SELECTOR, "[data-testid='select-accounts-selector']"),
+            (By.XPATH, "//button[contains(@id,'accounts-selector') or contains(@aria-label,'Account')]")
+        ]
+        if not self._try_click_any(dropdown_locators, timeout_seconds=12):
+            await self.log("WARN Accounts dropdown not clickable in main DOM/iframes/shadow roots; keeping default selected account(s)")
+            return
+
+        option_locators = [
+            self.sel.ACCOUNTS_ALL_ELIGIBLE,
+            (By.XPATH, "//span[contains(normalize-space(),'All Eligible Accounts')]"),
+            (By.XPATH, "//span[contains(normalize-space(),'All Accounts') or contains(normalize-space(),'All accounts')]"),
+            (By.XPATH, "//li[contains(., 'All Eligible Accounts') or contains(., 'All Accounts')]")
+        ]
+        if self._try_click_any(option_locators, timeout_seconds=8):
+            await self.log("OK Accounts selected")
+            return
+
+        await self.log("WARN 'All accounts' option not found in main DOM/iframes/shadow roots; keeping default selected account(s)")
 
     async def enable_show_all_tax_lots(self) -> None:
         await self.log("Enabling show all tax lots...")
-        toggle = self.helpers.find_element(*self.sel.SHOW_ALL_TAX_LOTS)
+        try:
+            toggle = self.helpers.find_element(*self.sel.SHOW_ALL_TAX_LOTS)
+        except Exception:
+            await self.log("WARN Show all tax lots toggle not found; continuing")
+            return
         is_checked = (toggle.get_attribute("aria-checked") or "").lower() == "true"
         if not is_checked:
             toggle.click()

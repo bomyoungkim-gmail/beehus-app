@@ -126,19 +126,6 @@ async function collectEntriesFromDirectoryHandle(
       const file = await fileHandle.getFile();
       const relativePath = prefix ? `${prefix}/${file.name}` : file.name;
       out.push({ file, relativePath });
-      continue;
-    }
-
-    if (entry.kind === "directory") {
-      const childHandle = entry as FileSystemDirectoryHandle;
-      const childPrefix = prefix
-        ? `${prefix}/${childHandle.name}`
-        : childHandle.name;
-      const nested = await collectEntriesFromDirectoryHandle(
-        childHandle,
-        childPrefix,
-      );
-      out.push(...nested);
     }
   }
 
@@ -449,27 +436,27 @@ async function parseError(error: unknown): Promise<ParsedBackendError> {
     };
   }
 
-  const payload = error.response?.data;
-  if (!(payload instanceof Blob)) {
-    return {
-      message: error.message || "Falha ao processar pastas.",
-      errors: [],
-    };
-  }
-
-  try {
-    const raw = await payload.text();
-    const parsed = JSON.parse(raw);
-    const detail = parsed?.detail;
+  const normalizeDetail = (detail: unknown): ParsedBackendError | null => {
     if (typeof detail === "string") {
       return {
         message: detail,
         errors: [],
       };
     }
-    if (detail?.message && Array.isArray(detail?.errors)) {
-      const normalizedErrors: FolderExecutionStatus[] = detail.errors.map(
-        (entry: { folder?: string; status?: string; error?: string }) => {
+
+    if (
+      detail &&
+      typeof detail === "object" &&
+      "message" in detail &&
+      "errors" in detail &&
+      Array.isArray((detail as { errors: unknown }).errors)
+    ) {
+      const detailObj = detail as {
+        message?: unknown;
+        errors: Array<{ folder?: string; status?: string; error?: string }>;
+      };
+      const normalizedErrors: FolderExecutionStatus[] = detailObj.errors.map(
+        (entry) => {
           const folder = entry.folder || "pasta";
           return {
             folder,
@@ -479,9 +466,69 @@ async function parseError(error: unknown): Promise<ParsedBackendError> {
         },
       );
       return {
-        message: detail.message,
+        message:
+          typeof detailObj.message === "string"
+            ? detailObj.message
+            : "Falha ao processar pastas.",
         errors: normalizedErrors,
       };
+    }
+
+    return null;
+  };
+
+  const payload = error.response?.data;
+  if (payload && typeof payload === "object" && !(payload instanceof Blob)) {
+    const detail = (payload as { detail?: unknown }).detail;
+    const normalized = normalizeDetail(detail);
+    if (normalized) {
+      return normalized;
+    }
+
+    const message = (payload as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      return {
+        message,
+        errors: [],
+      };
+    }
+
+    return {
+      message: error.message || "Falha ao processar pastas.",
+      errors: [],
+    };
+  }
+
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload);
+      const normalized = normalizeDetail(
+        (parsed as { detail?: unknown }).detail,
+      );
+      if (normalized) {
+        return normalized;
+      }
+    } catch {
+      if (payload.trim()) {
+        return {
+          message: payload,
+          errors: [],
+        };
+      }
+    }
+
+    return {
+      message: error.message || "Falha ao processar pastas.",
+      errors: [],
+    };
+  }
+
+  try {
+    const raw = await payload.text();
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    const normalized = normalizeDetail(parsed.detail);
+    if (normalized) {
+      return normalized;
     }
     return {
       message: raw || "Falha ao processar pastas.",
@@ -712,7 +759,8 @@ export default function ProcessamentoAutomatizado() {
         {
           params: {
             sandbox_mode: SANDBOX_MODE,
-            pull_image: true,
+            pull_image: false,
+            run_probe: true,
             timeout_seconds: PROCESS_TIMEOUT_SECONDS,
           },
           timeout: 0,
@@ -798,7 +846,7 @@ export default function ProcessamentoAutomatizado() {
         const inputCount = entries.length - scriptCount;
         if (scriptCount !== 1) {
           throw new Error(
-            `A pasta ${folder.displayName} precisa ter exatamente 1 arquivo .py.`,
+            `A pasta ${folder.displayName} precisa ter exatamente 1 arquivo .py na raiz da pasta (subpastas sao ignoradas).`,
           );
         }
         if (inputCount < 1) {

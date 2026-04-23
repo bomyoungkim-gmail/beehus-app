@@ -183,7 +183,8 @@ Use these endpoints when a run requires manual processing selection:
 
 - `GET /processamento-automatizado/sandbox-health`
   - valida disponibilidade do Docker e (opcionalmente) executa `docker pull` da imagem configurada
-  - query params: `sandbox_mode`, `pull_image`, `timeout_seconds`
+  - query params: `sandbox_mode`, `pull_image`, `run_probe`, `timeout_seconds`
+  - `run_probe=true` executa um `docker run` de validacao com as mesmas flags de hardening do sandbox para detectar bloqueios de execucao antes do upload
 - `POST /processamento-automatizado/process`
   - multipart upload de arquivos organizados por pasta relativa
   - query params: `timeout_seconds`, `sandbox_mode=none|docker`

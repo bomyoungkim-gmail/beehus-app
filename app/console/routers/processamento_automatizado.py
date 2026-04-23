@@ -118,12 +118,14 @@ def _map_processing_exception(exc: AutomatedProcessingError) -> HTTPException:
 async def sandbox_health_check(
     sandbox_mode: str = Query("docker"),
     pull_image: bool = Query(True),
+    run_probe: bool = Query(True),
     timeout_seconds: int = Query(600, ge=10, le=3600),
 ):
     try:
         health = validate_sandbox_health(
             sandbox_mode=sandbox_mode,
             pull_image=pull_image,
+            run_probe=run_probe,
             timeout_seconds=timeout_seconds,
         )
         return _serialize_sandbox_health(health)

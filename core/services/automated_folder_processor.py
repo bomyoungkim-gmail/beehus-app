@@ -13,11 +13,13 @@ import subprocess
 import sys
 import tempfile
 from typing import Literal, Sequence
+from uuid import uuid4
 import zipfile
 
 
 _SAFE_COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9._ -]+")
 _ALLOWLIST_SPLIT_PATTERN = re.compile(r"[;,\n]+")
+_DOCKER_CONTAINER_COMPONENT_PATTERN = re.compile(r"[^a-z0-9_.-]+")
 
 SandboxMode = Literal["none", "docker"]
 
@@ -100,10 +102,24 @@ def _parse_sandbox_mode(raw_mode: str) -> SandboxMode:
     )
 
 
+def _build_sandbox_container_name(context: str) -> str:
+    normalized_context = (context or "folder").strip().lower()
+    normalized_context = _DOCKER_CONTAINER_COMPONENT_PATTERN.sub("-", normalized_context)
+    normalized_context = normalized_context.strip("-.")
+    if not normalized_context:
+        normalized_context = "folder"
+
+    normalized_context = normalized_context[:32].rstrip("-.") or "folder"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    nonce = uuid4().hex[:8]
+    return f"beehus-sandbox-{normalized_context}-{timestamp}-{nonce}"
+
+
 def validate_sandbox_health(
     *,
     sandbox_mode: str,
     pull_image: bool = True,
+    run_probe: bool = False,
     timeout_seconds: int | None = None,
 ) -> SandboxHealthResult:
     mode = _parse_sandbox_mode(sandbox_mode)
@@ -195,6 +211,61 @@ def validate_sandbox_health(
                 "Faca build/pull da imagem ou habilite pull_image=true no health-check."
             )
         message = f"Sandbox Docker validado com imagem local '{image}'."
+
+    if run_probe:
+        probe_container_name = _build_sandbox_container_name("health")
+        probe_command = [
+            docker_binary,
+            "run",
+            "--rm",
+            "--name",
+            probe_container_name,
+            "--network",
+            "none",
+            "--cpus",
+            _docker_cpu_limit(),
+            "--memory",
+            _docker_memory_limit(),
+            "--pids-limit",
+            _docker_pids_limit(),
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=64m",
+            image,
+            "python",
+            "-V",
+        ]
+        try:
+            probe_result = subprocess.run(
+                probe_command,
+                capture_output=True,
+                text=True,
+                timeout=effective_timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise AutomatedProcessingError(
+                f"Timeout ao executar probe Docker da imagem '{image}' ({effective_timeout}s)."
+            ) from exc
+
+        if probe_result.returncode != 0:
+            probe_detail = (probe_result.stderr or probe_result.stdout or "").strip()
+            if not probe_detail:
+                probe_detail = f"codigo de saida {probe_result.returncode}"
+            raise AutomatedProcessingError(
+                "Health-check sandbox falhou no probe de execucao da imagem "
+                f"'{image}': {probe_detail}"
+            )
+
+        probe_output = (probe_result.stdout or probe_result.stderr or "").strip()
+        if probe_output:
+            message = f"{message} Probe de execucao OK ({probe_output})."
+        else:
+            message = f"{message} Probe de execucao OK."
 
     return SandboxHealthResult(
         ready=True,
@@ -363,7 +434,7 @@ def _should_ignore_path(path: PurePosixPath) -> bool:
 
 def _snapshot_non_python_files(folder_path: Path) -> dict[str, tuple[int, int]]:
     snapshot: dict[str, tuple[int, int]] = {}
-    for candidate in folder_path.rglob("*"):
+    for candidate in folder_path.iterdir():
         if not candidate.is_file():
             continue
         relative = PurePosixPath(candidate.relative_to(folder_path).as_posix())
@@ -376,19 +447,25 @@ def _snapshot_non_python_files(folder_path: Path) -> dict[str, tuple[int, int]]:
 
 def _find_single_python_script(folder_path: Path, folder_name: str) -> Path:
     scripts: list[Path] = []
-    for candidate in folder_path.rglob("*.py"):
+    for candidate in folder_path.iterdir():
+        if not candidate.is_file():
+            continue
+        if candidate.suffix.lower() != ".py":
+            continue
         relative = PurePosixPath(candidate.relative_to(folder_path).as_posix())
         if "__pycache__" in relative.parts:
             continue
         scripts.append(candidate)
 
     if not scripts:
-        raise AutomatedProcessingError(f"Pasta {folder_name} nao possui arquivo .py de processamento.")
+        raise AutomatedProcessingError(
+            f"Pasta {folder_name} nao possui arquivo .py de processamento na raiz da pasta (subpastas sao ignoradas)."
+        )
 
     if len(scripts) > 1:
         names = ", ".join(sorted(path.relative_to(folder_path).as_posix() for path in scripts))
         raise AutomatedProcessingError(
-            f"Pasta {folder_name} possui mais de um arquivo .py ({names}). Deixe apenas um script por pasta."
+            f"Pasta {folder_name} possui mais de um arquivo .py na raiz ({names}). Deixe apenas um script .py na raiz da pasta."
         )
 
     return scripts[0]
@@ -415,6 +492,19 @@ def _copy_outputs(
 
 def _script_failure_hint(error_detail: str) -> str:
     lowered = error_detail.lower()
+    if (
+        "exec /usr/local/bin/python" in lowered
+        and "operation not permitted" in lowered
+    ):
+        return (
+            " Dica: o sandbox Docker iniciou, mas a execucao do binario Python foi "
+            "bloqueada pelo runtime do host. Isso geralmente indica politica de "
+            "seguranca do ambiente (seccomp/apparmor/noexec) ou imagem sandbox "
+            "invalida/corrompida. Valide no host: primeiro execute a imagem sem "
+            "hardening (docker run --rm <imagem> python -V) e depois repita com "
+            "os mesmos flags de sandbox aplicados pelo Beehus."
+        )
+
     if (
         "conditional_formatting.add" in lowered
         and (
@@ -691,11 +781,14 @@ def _run_folder_command(
             docker_binary=docker_binary,
             timeout_seconds=timeout_seconds,
         )
+        sandbox_container_name = _build_sandbox_container_name(folder_name)
 
         docker_command = [
             docker_binary,
             "run",
             "--rm",
+            "--name",
+            sandbox_container_name,
             "--network",
             "none",
             "--cpus",

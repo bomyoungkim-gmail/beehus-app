@@ -8,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -127,14 +128,43 @@ def _docker_hardening_flags() -> list[str]:
     ]
 
 
+def _truncate_text(value: str, limit: int = 240) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
+
+
+def _format_command(command: Sequence[str]) -> str:
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def _probe_execution_diagnostic(
+    *,
+    stage: str,
+    command: Sequence[str],
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> str:
+    return (
+        f"{stage}: rc={returncode}; cmd={_format_command(command)}; "
+        f"stdout={_truncate_text(stdout)}; stderr={_truncate_text(stderr)}"
+    )
+
+
 def _is_python_exec_permission_error(detail: str) -> bool:
     lowered = (detail or "").lower()
+    if "operation not permitted" not in lowered:
+        return False
+
     return (
-        "operation not permitted" in lowered
-        and (
-            "exec /usr/local/bin/python" in lowered
-            or 'exec: "python"' in lowered
-        )
+        "exec /usr/local/bin/python" in lowered
+        or 'exec "/usr/local/bin/python"' in lowered
+        or "exec: \"python\"" in lowered
+        or "exec: python" in lowered
     )
 
 
@@ -268,9 +298,18 @@ def validate_sandbox_health(
             ) from exc
 
         if probe_result.returncode != 0:
-            probe_detail = (probe_result.stderr or probe_result.stdout or "").strip()
+            probe_stdout = (probe_result.stdout or "").strip()
+            probe_stderr = (probe_result.stderr or "").strip()
+            probe_detail = (probe_stderr or probe_stdout).strip()
             if not probe_detail:
                 probe_detail = f"codigo de saida {probe_result.returncode}"
+            strict_diag = _probe_execution_diagnostic(
+                stage="strict",
+                command=probe_command,
+                returncode=probe_result.returncode,
+                stdout=probe_stdout,
+                stderr=probe_stderr,
+            )
             if _is_python_exec_permission_error(probe_detail):
                 relaxed_probe_command = probe_base_command + [image, "python", "-V"]
                 try:
@@ -288,14 +327,22 @@ def validate_sandbox_health(
                     ) from exc
 
                 if relaxed_probe_result.returncode != 0:
-                    relaxed_detail = (
-                        relaxed_probe_result.stderr or relaxed_probe_result.stdout or ""
-                    ).strip()
+                    relaxed_stdout = (relaxed_probe_result.stdout or "").strip()
+                    relaxed_stderr = (relaxed_probe_result.stderr or "").strip()
+                    relaxed_detail = (relaxed_stderr or relaxed_stdout).strip()
                     if not relaxed_detail:
                         relaxed_detail = f"codigo de saida {relaxed_probe_result.returncode}"
+                    relaxed_diag = _probe_execution_diagnostic(
+                        stage="relaxed",
+                        command=relaxed_probe_command,
+                        returncode=relaxed_probe_result.returncode,
+                        stdout=relaxed_stdout,
+                        stderr=relaxed_stderr,
+                    )
                     raise AutomatedProcessingError(
                         "Health-check sandbox falhou no probe de execucao da imagem "
-                        f"'{image}' (modo hardening e fallback sem hardening): {relaxed_detail}"
+                        f"'{image}' (modo hardening e fallback sem hardening): {relaxed_detail}. "
+                        f"Diagnostico: {strict_diag} | {relaxed_diag}"
                     )
 
                 probe_output = (relaxed_probe_result.stdout or relaxed_probe_result.stderr or "").strip()
@@ -312,7 +359,7 @@ def validate_sandbox_health(
             else:
                 raise AutomatedProcessingError(
                     "Health-check sandbox falhou no probe de execucao da imagem "
-                    f"'{image}': {probe_detail}"
+                    f"'{image}': {probe_detail}. Diagnostico: {strict_diag}"
                 )
 
         elif "fallback sem hardening" not in message:

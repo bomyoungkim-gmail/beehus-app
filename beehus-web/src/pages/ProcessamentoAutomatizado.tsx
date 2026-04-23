@@ -827,6 +827,9 @@ export default function ProcessamentoAutomatizado() {
   };
 
   const runSandboxHealthCheck = async (): Promise<boolean> => {
+    pushLog(
+      `Executando health-check sandbox (mode=${SANDBOX_MODE}, pull_image=false, run_probe=true, timeout=${PROCESS_TIMEOUT_SECONDS}s)...`,
+    );
     try {
       const response = await axios.get<SandboxHealthResponse>(
         `${apiBase}/processamento-automatizado/sandbox-health`,

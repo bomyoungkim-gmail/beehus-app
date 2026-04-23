@@ -736,11 +736,16 @@ def _execution_wrapper_code() -> str:
         "        def __exit__(self, exc_type, exc, tb):\n"
         "            self.close()\n"
         "    def _safe_read_excel(io, *args, **kwargs):\n"
+        "        if isinstance(io, _CompatExcelFile):\n"
+        "            sheet_name = kwargs.pop('sheet_name', 0)\n"
+        "            if len(args) >= 1:\n"
+        "                sheet_name = args[0]\n"
+        "            return io.parse(sheet_name=sheet_name, **kwargs)\n"
         "        try:\n"
         "            return _orig_read_excel(io, *args, **kwargs)\n"
         "        except Exception:\n"
-        "            if not _looks_like_html_table(io):\n"
-        "                raise\n"
+            "            if not _looks_like_html_table(io):\n"
+            "                raise\n"
         "            sheet_name = kwargs.get('sheet_name', 0)\n"
         "            if len(args) >= 1:\n"
         "                sheet_name = args[0]\n"
@@ -1067,7 +1072,7 @@ def _process_materialized_folders(
             failures.append(status_item)
             folder_statuses.append(status_item)
 
-    if failures:
+    if failures and not summaries:
         raise AutomatedProcessingError("Falha ao processar uma ou mais pastas.", details=folder_statuses)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

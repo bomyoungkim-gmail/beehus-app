@@ -1,4 +1,4 @@
-FROM nginx:alpine
+FROM docker.io/library/nginx:1.29@sha256:296499281873ebe2636681c6957776d29a31858d93c3e39b654b5aade87ed70a
 
 COPY dist/ /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/nginx.conf

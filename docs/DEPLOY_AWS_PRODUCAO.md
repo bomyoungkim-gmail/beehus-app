@@ -12,7 +12,7 @@ Este guia coloca a aplicacao em producao na AWS, com:
 - Docker + Docker Compose
 - Stack da aplicacao via `docker-compose.yml` + `docker-compose.prod.yml`
 - Nginx no host (porta 80/443) para:
-  - `/` -> container frontend (`127.0.0.1:5173`)
+  - `/` -> container frontend-prod (`127.0.0.1:3000`)
   - `/api/` -> container API (`127.0.0.1:8000`)
 - Certificado TLS com Certbot (Let's Encrypt)
 
@@ -125,7 +125,7 @@ server {
     client_max_body_size 50m;
 
     location / {
-        proxy_pass http://127.0.0.1:5173;
+        proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -195,7 +195,7 @@ docker compose restart app-console
 cd /opt/beehus-app
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-docker compose logs -f app-console celery-worker frontend
+docker compose logs -f app-console celery-worker frontend-prod
 ```
 
 ### Rebuild rapido do frontend (quando mudar apenas Vite/React)
@@ -208,14 +208,14 @@ npm ci
 npm run build
 cd /opt/beehus-app
 
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d frontend
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d frontend-prod
 ```
 
-Se o container `frontend` ja estiver em execucao, isso normalmente basta porque ele monta `./beehus-web/dist` em volume.
+Se o container `frontend-prod` ja estiver em execucao, isso normalmente basta para reciclar a imagem de frontend.
 Se quiser forcar a reciclagem do container:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml restart frontend
+docker compose -f docker-compose.yml -f docker-compose.prod.yml restart frontend-prod
 ```
 
 ## 13. Problemas comuns

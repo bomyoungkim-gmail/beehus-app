@@ -2,8 +2,13 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
-  # Build a dedicated production frontend image with nginx
+  # Disable the development frontend in production runs
   frontend:
+    profiles:
+      - dev-only
+
+  # Dedicated production frontend (nginx + static dist)
+  frontend-prod:
     build:
       context: ./beehus-web
       dockerfile: Dockerfile.prod

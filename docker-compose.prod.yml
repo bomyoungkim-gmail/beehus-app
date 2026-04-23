@@ -4,16 +4,20 @@
 services:
   # Replace development frontend with production nginx
   frontend:
+    build: !reset null
+    working_dir: !reset null
+    environment: !reset {}
     image: nginx:alpine
     container_name: beehus-app-frontend-prod
     restart: unless-stopped
-    ports:
+    ports: !override
       - "3000:80"
-    volumes:
+    volumes: !override
       - ./beehus-web/dist:/usr/share/nginx/html:ro
       - ./beehus-web/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - app-console
+    depends_on: !override
+      app-console:
+        condition: service_started
     networks:
       - scrape-net
     command: ["nginx", "-g", "daemon off;"]

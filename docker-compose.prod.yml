@@ -6,7 +6,8 @@ services:
   frontend:
     build: !reset null
     working_dir: !reset null
-    environment: !reset {}
+    environment: !reset []
+    entrypoint: []
     image: nginx:alpine
     container_name: beehus-app-frontend-prod
     restart: unless-stopped

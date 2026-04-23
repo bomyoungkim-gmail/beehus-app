@@ -48,6 +48,7 @@ type ProcessedFileRecord = {
   path: string;
   filename: string;
   url: string;
+  blob: Blob;
 };
 
 type WindowWithDirectoryPicker = Window & {
@@ -348,6 +349,7 @@ function createSingleProcessedFileRecord(
     path: filename,
     filename,
     url: URL.createObjectURL(blob),
+    blob,
   };
 }
 
@@ -382,6 +384,7 @@ async function buildProcessedFileRecords(
         path: zipPath,
         filename: shortName,
         url: URL.createObjectURL(entryBlob),
+        blob: entryBlob,
       });
     }
 
@@ -542,6 +545,31 @@ async function parseError(error: unknown): Promise<ParsedBackendError> {
   }
 }
 
+async function ensureDirectoryWritePermission(
+  directoryHandle: FileSystemDirectoryHandle,
+): Promise<boolean> {
+  const handleWithPermission =
+    directoryHandle as DirectoryHandleWithPermission;
+
+  if (handleWithPermission.queryPermission) {
+    const permission = await handleWithPermission.queryPermission({
+      mode: "readwrite",
+    });
+    if (permission === "granted") {
+      return true;
+    }
+  }
+
+  if (handleWithPermission.requestPermission) {
+    const permission = await handleWithPermission.requestPermission({
+      mode: "readwrite",
+    });
+    return permission === "granted";
+  }
+
+  return false;
+}
+
 export default function ProcessamentoAutomatizado() {
   const [folders, setFolders] = useState<FolderUpload[]>([]);
   const [foldersLoadedFromStorage, setFoldersLoadedFromStorage] =
@@ -641,6 +669,52 @@ export default function ProcessamentoAutomatizado() {
     setSandboxHealthMessage("");
     setProcessedFiles([]);
     setPreparedMetrics({});
+  };
+
+  const triggerBrowserDownload = (file: ProcessedFileRecord) => {
+    const link = document.createElement("a");
+    link.href = file.url;
+    link.download = file.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleDownloadFile = async (file: ProcessedFileRecord) => {
+    const folderHandle = folders.find(
+      (folder) => folder.id === file.folder,
+    )?.directoryHandle;
+
+    if (!folderHandle) {
+      triggerBrowserDownload(file);
+      return;
+    }
+
+    try {
+      const canWrite = await ensureDirectoryWritePermission(folderHandle);
+      if (!canWrite) {
+        triggerBrowserDownload(file);
+        showToast(
+          "Sem permissao de escrita na pasta original. Usando download do navegador.",
+          "error",
+        );
+        return;
+      }
+
+      const target = await folderHandle.getFileHandle(file.filename, {
+        create: true,
+      });
+      const writable = await target.createWritable();
+      await writable.write(file.blob);
+      await writable.close();
+      showToast(`Arquivo salvo na pasta original: ${file.filename}`, "success");
+    } catch {
+      triggerBrowserDownload(file);
+      showToast(
+        "Nao foi possivel salvar direto na pasta original. Usando download do navegador.",
+        "error",
+      );
+    }
   };
 
   const applySelectedFolder = (
@@ -1145,14 +1219,16 @@ export default function ProcessamentoAutomatizado() {
                       {filesForFolder.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-2">
                           {filesForFolder.map((file) => (
-                            <a
+                            <button
                               key={`${entry.folder}-${file.path}`}
-                              href={file.url}
-                              download={file.filename}
+                              type="button"
+                              onClick={() => {
+                                void handleDownloadFile(file);
+                              }}
                               className="text-[11px] px-2 py-1 rounded border border-blue-500/40 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20"
                             >
                               Baixar {file.filename}
-                            </a>
+                            </button>
                           ))}
                         </div>
                       )}

@@ -115,6 +115,29 @@ def _build_sandbox_container_name(context: str) -> str:
     return f"beehus-sandbox-{normalized_context}-{timestamp}-{nonce}"
 
 
+def _docker_hardening_flags() -> list[str]:
+    return [
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=64m",
+    ]
+
+
+def _is_python_exec_permission_error(detail: str) -> bool:
+    lowered = (detail or "").lower()
+    return (
+        "operation not permitted" in lowered
+        and (
+            "exec /usr/local/bin/python" in lowered
+            or 'exec: "python"' in lowered
+        )
+    )
+
+
 def validate_sandbox_health(
     *,
     sandbox_mode: str,
@@ -214,7 +237,7 @@ def validate_sandbox_health(
 
     if run_probe:
         probe_container_name = _build_sandbox_container_name("health")
-        probe_command = [
+        probe_base_command = [
             docker_binary,
             "run",
             "--rm",
@@ -228,17 +251,9 @@ def validate_sandbox_health(
             _docker_memory_limit(),
             "--pids-limit",
             _docker_pids_limit(),
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,size=64m",
-            image,
-            "python",
-            "-V",
         ]
+
+        probe_command = probe_base_command + _docker_hardening_flags() + [image, "python", "-V"]
         try:
             probe_result = subprocess.run(
                 probe_command,
@@ -256,16 +271,56 @@ def validate_sandbox_health(
             probe_detail = (probe_result.stderr or probe_result.stdout or "").strip()
             if not probe_detail:
                 probe_detail = f"codigo de saida {probe_result.returncode}"
-            raise AutomatedProcessingError(
-                "Health-check sandbox falhou no probe de execucao da imagem "
-                f"'{image}': {probe_detail}"
-            )
+            if _is_python_exec_permission_error(probe_detail):
+                relaxed_probe_command = probe_base_command + [image, "python", "-V"]
+                try:
+                    relaxed_probe_result = subprocess.run(
+                        relaxed_probe_command,
+                        capture_output=True,
+                        text=True,
+                        timeout=effective_timeout,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise AutomatedProcessingError(
+                        "Health-check sandbox falhou no fallback sem hardening da imagem "
+                        f"'{image}' por timeout ({effective_timeout}s)."
+                    ) from exc
 
-        probe_output = (probe_result.stdout or probe_result.stderr or "").strip()
-        if probe_output:
-            message = f"{message} Probe de execucao OK ({probe_output})."
-        else:
-            message = f"{message} Probe de execucao OK."
+                if relaxed_probe_result.returncode != 0:
+                    relaxed_detail = (
+                        relaxed_probe_result.stderr or relaxed_probe_result.stdout or ""
+                    ).strip()
+                    if not relaxed_detail:
+                        relaxed_detail = f"codigo de saida {relaxed_probe_result.returncode}"
+                    raise AutomatedProcessingError(
+                        "Health-check sandbox falhou no probe de execucao da imagem "
+                        f"'{image}' (modo hardening e fallback sem hardening): {relaxed_detail}"
+                    )
+
+                probe_output = (relaxed_probe_result.stdout or relaxed_probe_result.stderr or "").strip()
+                if probe_output:
+                    message = (
+                        f"{message} Probe de execucao OK ({probe_output}) com fallback sem hardening "
+                        "(host bloqueou execucao Python com politicas restritas)."
+                    )
+                else:
+                    message = (
+                        f"{message} Probe de execucao OK com fallback sem hardening "
+                        "(host bloqueou execucao Python com politicas restritas)."
+                    )
+            else:
+                raise AutomatedProcessingError(
+                    "Health-check sandbox falhou no probe de execucao da imagem "
+                    f"'{image}': {probe_detail}"
+                )
+
+        elif "fallback sem hardening" not in message:
+            probe_output = (probe_result.stdout or probe_result.stderr or "").strip()
+            if probe_output:
+                message = f"{message} Probe de execucao OK ({probe_output})."
+            else:
+                message = f"{message} Probe de execucao OK."
 
     return SandboxHealthResult(
         ready=True,
@@ -783,7 +838,7 @@ def _run_folder_command(
         )
         sandbox_container_name = _build_sandbox_container_name(folder_name)
 
-        docker_command = [
+        docker_base_command = [
             docker_binary,
             "run",
             "--rm",
@@ -797,27 +852,31 @@ def _run_folder_command(
             _docker_memory_limit(),
             "--pids-limit",
             _docker_pids_limit(),
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,size=64m",
             "--mount",
             f"type=bind,src={bind_source_path},dst=/work",
             "--workdir",
             "/work",
-            _docker_image(),
-            "python",
-            "-I",
-            "-B",
-            "-c",
-            wrapper_code,
-            script_relative,
         ]
+        docker_exec_args = [_docker_image(), "python", "-I", "-B", "-c", wrapper_code, script_relative]
+
+        strict_command = docker_base_command + _docker_hardening_flags() + docker_exec_args
+        strict_result = subprocess.run(
+            strict_command,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        if strict_result.returncode == 0:
+            return strict_result
+
+        strict_detail = (strict_result.stderr or strict_result.stdout or "").strip()
+        if not _is_python_exec_permission_error(strict_detail):
+            return strict_result
+
+        relaxed_command = docker_base_command + docker_exec_args
         return subprocess.run(
-            docker_command,
+            relaxed_command,
             capture_output=True,
             text=True,
             timeout=timeout_seconds,

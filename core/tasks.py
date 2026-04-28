@@ -121,6 +121,16 @@ async def _ensure_selenium_slots(redis_client) -> None:
         await redis_client.delete(SELENIUM_SLOT_KEY)
         if tokens:
             await redis_client.rpush(SELENIUM_SLOT_KEY, *tokens)
+        return
+
+    # Pool was previously initialized — check if fully drained with no active holders
+    pool_size = await redis_client.llen(SELENIUM_SLOT_KEY)
+    if pool_size == 0:
+        active_count = await redis_client.hlen(SELENIUM_SLOT_ACTIVE_KEY)
+        if active_count == 0:
+            tokens = [f"slot-{i}" for i in range(SELENIUM_MAX_SLOTS)]
+            await redis_client.rpush(SELENIUM_SLOT_KEY, *tokens)
+            logger.warning(f"♻️ Pool vazio sem holders ativos — reinicializados {SELENIUM_MAX_SLOTS} slots")
 
 
 async def _reclaim_stale_slots(redis_client) -> int:

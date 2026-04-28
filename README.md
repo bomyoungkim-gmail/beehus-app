@@ -272,3 +272,6 @@ curl -X POST "http://localhost:8000/jobs/{job_id}/run"
 3. **Action:** Send an email to the configured address with subject "Code" and body containing "123456" (or similar 6 digits).
 4. **Inbox Worker** will log `OTP Found`.
 5. **Core Worker** will log `OTP Code received!` and finish successfully.
+
+
+https://login.morganstanleyclientserv.com/ux/#/accounts/holdings?referer=mso-menu	L: Beehus	S: Beehus2025!

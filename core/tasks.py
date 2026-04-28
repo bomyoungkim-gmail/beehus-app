@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 SELENIUM_SLOT_KEY = "selenium:slots"
 SELENIUM_SLOT_INIT_KEY = "selenium:slots:initialized"
+SELENIUM_SLOT_ACTIVE_KEY = "selenium:slots:active"
+SELENIUM_SLOT_MAX_AGE_SECONDS = 1800  # reclaim slots held longer than 30 min
 SELENIUM_MAX_SLOTS = max(
     1,
     settings.SELENIUM_MAX_SLOTS,
@@ -113,18 +115,41 @@ def _is_history_file(filename: str) -> bool:
 
 async def _ensure_selenium_slots(redis_client) -> None:
     """Ensure the Selenium slot pool exists in Redis."""
-    # Use SETNX to avoid re-initializing the slot pool
     initialized = await redis_client.setnx(SELENIUM_SLOT_INIT_KEY, "1")
     if initialized:
-        # Pre-fill the slot pool with N tokens
         tokens = [f"slot-{i}" for i in range(SELENIUM_MAX_SLOTS)]
         await redis_client.delete(SELENIUM_SLOT_KEY)
         if tokens:
             await redis_client.rpush(SELENIUM_SLOT_KEY, *tokens)
 
 
+async def _reclaim_stale_slots(redis_client) -> int:
+    """Return any slots held beyond SELENIUM_SLOT_MAX_AGE_SECONDS back to the pool."""
+    import time
+
+    active = await redis_client.hgetall(SELENIUM_SLOT_ACTIVE_KEY)
+    reclaimed = 0
+    now = time.time()
+    for raw_token, raw_value in active.items():
+        token = raw_token.decode() if isinstance(raw_token, bytes) else str(raw_token)
+        value = raw_value.decode() if isinstance(raw_value, bytes) else str(raw_value)
+        try:
+            acquired_at = float(value.split(":", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        age = now - acquired_at
+        if age > SELENIUM_SLOT_MAX_AGE_SECONDS:
+            await redis_client.hdel(SELENIUM_SLOT_ACTIVE_KEY, token)
+            await redis_client.lpush(SELENIUM_SLOT_KEY, token)
+            logger.warning(f"♻️ Reclaimed stale Selenium slot {token} (held {age:.0f}s)")
+            reclaimed += 1
+    return reclaimed
+
+
 async def _acquire_selenium_slot(run_id: str, timeout_seconds: int = 300) -> str | None:
     """Acquire a Selenium slot token to limit concurrent sessions."""
+    import time
+
     try:
         import redis.asyncio as redis
     except Exception as e:
@@ -140,10 +165,21 @@ async def _acquire_selenium_slot(run_id: str, timeout_seconds: int = 300) -> str
             if result:
                 _, token = result
                 token_str = token.decode() if isinstance(token, (bytes, bytearray)) else str(token)
+                await redis_client.hset(SELENIUM_SLOT_ACTIVE_KEY, token_str, f"{run_id}:{time.time()}")
                 logger.info(f"✅ Acquired Selenium slot {token_str} for run {run_id}")
                 return token_str
             waited = (get_now() - start).total_seconds()
             if waited >= timeout_seconds:
+                reclaimed = await _reclaim_stale_slots(redis_client)
+                if reclaimed:
+                    logger.info(f"♻️ Reclaimed {reclaimed} stale slot(s), retrying acquisition for run {run_id}")
+                    result = await redis_client.brpop(SELENIUM_SLOT_KEY, timeout=5)
+                    if result:
+                        _, token = result
+                        token_str = token.decode() if isinstance(token, (bytes, bytearray)) else str(token)
+                        await redis_client.hset(SELENIUM_SLOT_ACTIVE_KEY, token_str, f"{run_id}:{time.time()}")
+                        logger.info(f"✅ Acquired Selenium slot {token_str} for run {run_id} after reclaim")
+                        return token_str
                 logger.error(f"⏳ Timed out waiting for Selenium slot after {timeout_seconds}s")
                 return None
             logger.info("⏳ Waiting for Selenium slot...")
@@ -163,6 +199,7 @@ async def _release_selenium_slot(token: str) -> None:
 
     redis_client = redis.from_url(settings.REDIS_URL)
     try:
+        await redis_client.hdel(SELENIUM_SLOT_ACTIVE_KEY, token)
         await redis_client.lpush(SELENIUM_SLOT_KEY, token)
         logger.info(f"🔓 Released Selenium slot {token}")
     finally:

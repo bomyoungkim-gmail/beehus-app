@@ -13,25 +13,9 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Module-level Redis connection pool — created once, reused per worker process.
-_redis_pool: redis.ConnectionPool | None = None
-
-
-def _get_redis_pool() -> redis.ConnectionPool:
-    """Return the module-level Redis connection pool, creating it on first call."""
-    global _redis_pool
-    if _redis_pool is None:
-        _redis_pool = redis.ConnectionPool.from_url(
-            settings.REDIS_URL,
-            max_connections=10,
-            decode_responses=False,
-        )
-    return _redis_pool
-
-
 def _get_redis_client() -> redis.Redis:
-    """Return a Redis client backed by the shared connection pool."""
-    return redis.Redis(connection_pool=_get_redis_pool())
+    """Return a fresh Redis client per call — avoids reusing a pool bound to a closed event loop."""
+    return redis.from_url(settings.REDIS_URL, decode_responses=False)
 
 
 class RunRepository:

@@ -31,6 +31,13 @@ interface ProcessingFileOption {
   sheet_options: string[];
 }
 
+interface HealthData {
+  runtime?: {
+    hostname?: string;
+    build_fingerprint?: { value?: string };
+  };
+}
+
 export default function Runs() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +54,7 @@ export default function Runs() {
   const [wsConnected, setWsConnected] = useState(false);
   const [wsConnecting, setWsConnecting] = useState(false);
   const [wsError, setWsError] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthData | null>(null);
   const { showToast } = useToast();
   const wsRef = useRef<WebSocket | null>(null);
   const retryCountRef = useRef(0);
@@ -65,6 +73,16 @@ export default function Runs() {
       console.error("Failed to fetch runs:", error);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const fetchHealth = useCallback(async () => {
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const res = await axios.get(`${apiBase}/health`);
+      setHealth(res.data || null);
+    } catch {
+      setHealth(null);
     }
   }, []);
 
@@ -102,15 +120,19 @@ export default function Runs() {
       setWsConnected(true);
       setWsConnecting(false);
       setWsError(null);
+      // Reconcile table state right after WS reconnect/open.
+      fetchRuns();
     };
 
     ws.onmessage = (event) => {
       if (ws !== wsRef.current) return;
       try {
         const data = JSON.parse(event.data);
+        let foundRun = false;
         setRuns((prevRuns) => {
-          return prevRuns.map((run) => {
+          const updated = prevRuns.map((run) => {
             if (run.run_id === data.run_id) {
+              foundRun = true;
               return {
                 ...run,
                 status: data.status,
@@ -119,7 +141,12 @@ export default function Runs() {
             }
             return run;
           });
+          return updated;
         });
+        if (!foundRun) {
+          // New run created after initial fetch: refresh list so it appears in history.
+          fetchRuns();
+        }
       } catch (e) {
         console.error("Failed to parse WS message:", e);
       }
@@ -168,12 +195,14 @@ export default function Runs() {
 
     // Fetch initial state
     fetchRuns();
+    fetchHealth();
     initialConnectTimeoutRef.current = window.setTimeout(() => {
       connectWebSocket();
     }, 0);
-    // Poll every 30 s but only when WebSocket is NOT connected (fallback).
+    // Reconciliation poll every 30s even with WS connected.
+    // WS may stay connected while missing events; polling prevents stale history UI.
     const pollId = window.setInterval(() => {
-      if (isMounted && !wsConnectedRef.current) {
+      if (isMounted) {
         fetchRuns();
       }
     }, 30000);
@@ -201,7 +230,7 @@ export default function Runs() {
       }
       window.clearInterval(pollId);
     };
-  }, [connectWebSocket, fetchRuns]);
+  }, [connectWebSocket, fetchRuns, fetchHealth]);
 
   const handleWsRetry = () => {
     retryCountRef.current = 0;
@@ -404,6 +433,11 @@ export default function Runs() {
           <div>
             <h2 className="text-2xl font-bold text-white">Execution History</h2>
             <p className="text-slate-400">View all job execution logs</p>
+            <p className="text-xs text-slate-500 mt-1">
+              API: {import.meta.env.VITE_API_URL || "http://localhost:8000"} | HOST:{" "}
+              {health?.runtime?.hostname || "-"} | FP:{" "}
+              {health?.runtime?.build_fingerprint?.value || "-"}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             <span

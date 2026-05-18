@@ -17,6 +17,9 @@ import asyncio
 import json
 import logging
 import os
+import socket
+import hashlib
+from pathlib import Path
 
 import redis.asyncio as redis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -144,8 +147,46 @@ app.include_router(processamento_automatizado.router)
 
 @app.get("/health", tags=["meta"])
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "app-console"}
+    """Health check endpoint with runtime identity for environment debugging."""
+    explicit_fp = (
+        os.getenv("BUILD_FINGERPRINT")
+        or os.getenv("GIT_SHA")
+        or os.getenv("GIT_COMMIT")
+        or os.getenv("COMMIT_SHA")
+    )
+    if explicit_fp:
+        source = "env"
+        fp = explicit_fp.strip()
+    else:
+        source = "hash"
+        digest = hashlib.sha256()
+        for file_path in (
+            "/app/app/console/main.py",
+            "/app/core/tasks.py",
+            "/app/core/connectors/registry.py",
+        ):
+            try:
+                digest.update(file_path.encode("utf-8", errors="ignore"))
+                digest.update(Path(file_path).read_bytes())
+            except Exception:
+                continue
+        fp = digest.hexdigest()[:12]
+
+    return {
+        "status": "healthy",
+        "service": "app-console",
+        "runtime": {
+            "hostname": os.getenv("HOSTNAME") or socket.gethostname(),
+            "compose_project": os.getenv("COMPOSE_PROJECT_NAME", "-"),
+            "image_tag": os.getenv("IMAGE_TAG") or os.getenv("APP_IMAGE_TAG") or "-",
+            "mongo_db_name": os.getenv("MONGO_DB_NAME", "-"),
+            "mongo_uri": os.getenv("MONGO_URI", "-"),
+            "build_fingerprint": {
+                "source": source,
+                "value": fp,
+            },
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

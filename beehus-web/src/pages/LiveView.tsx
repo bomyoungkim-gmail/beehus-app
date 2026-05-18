@@ -12,6 +12,13 @@ interface RunData {
     vnc_url?: string;
 }
 
+interface HealthData {
+  runtime?: {
+    build_fingerprint?: { value?: string };
+    hostname?: string;
+  };
+}
+
 function normalizeRunVncUrl(rawUrl: string | null | undefined, hostPortBase: number): string | null {
   if (!rawUrl) return null;
   try {
@@ -71,6 +78,8 @@ export default function LiveView() {
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthData | null>(null);
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
   // Poll for Run Data
   useEffect(() => {
@@ -90,6 +99,8 @@ export default function LiveView() {
             if (axios.isAxiosError(err) && err.response?.status === 401) {
                 logout();
                 navigate('/login');
+            } else if (axios.isAxiosError(err) && err.response?.status === 404) {
+                setError(`Run ${runId} not found in backend ${apiBase}`);
             } else {
                 setError("Failed to load run details");
             }
@@ -111,6 +122,9 @@ export default function LiveView() {
             if (axios.isAxiosError(err) && err.response?.status === 401) {
                 logout();
                 navigate('/login');
+            } else if (axios.isAxiosError(err) && err.response?.status === 404) {
+                setError(`Run ${runId} not found in backend ${apiBase}`);
+                clearInterval(interval);
             }
             // Don't set global error for polling, just log
         }
@@ -118,6 +132,18 @@ export default function LiveView() {
 
     return () => clearInterval(interval);
   }, [runId, navigate, logout]);
+
+  useEffect(() => {
+    const fetchHealth = async () => {
+      try {
+        const healthRes = await axios.get(`${apiBase}/health`);
+        setHealth(healthRes.data || null);
+      } catch {
+        setHealth(null);
+      }
+    };
+    fetchHealth();
+  }, [apiBase]);
 
   // Scroll to bottom of logs
   useEffect(() => {
@@ -217,6 +243,9 @@ export default function LiveView() {
                         </span>
                     </div>
                     <p className="text-xs text-slate-400 font-mono mt-0.5">Run ID: {run.id}</p>
+                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                      API: {apiBase} | FP: {health?.runtime?.build_fingerprint?.value || "-"} | HOST: {health?.runtime?.hostname || "-"}
+                    </p>
                 </div>
             </div>
             <div className="flex items-center space-x-3">

@@ -544,10 +544,30 @@ export default function Jobs() {
 
     const triggerJob = async (jobId: string) => {
         try {
-            const res = await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/jobs/${jobId}/run`);
-            showToast(`Job triggered! Run ID: ${res.data.id}`, 'success');
-            navigate(`/live/${res.data.id}`);
+            const traceId = (globalThis.crypto?.randomUUID?.() || `trace-${Date.now()}`);
+            const clientTime = new Date().toISOString();
+            const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+            const res = await axios.post(
+                `${apiBase}/jobs/${jobId}/run`,
+                {},
+                {
+                    headers: {
+                        'X-Beehus-Client-Trace': traceId,
+                        'X-Beehus-Client-Time': clientTime,
+                    },
+                },
+            );
+            const runId = res.data.id;
+            // Hard guard: confirm run is readable before redirecting to LiveView.
+            // This prevents false-positive "triggered" feedback when API/runtime is mismatched.
+            await axios.get(`${apiBase}/runs/${runId}`);
+            showToast(`Job triggered! Run ID: ${res.data.id} | Trace: ${traceId.slice(0, 8)}`, 'success');
+            navigate(`/live/${runId}`);
         } catch (error) {
+            if (axios.isAxiosError(error) && error.response?.status === 404) {
+                showToast('Run created but not found on API. Check backend/runtime sync.', 'error');
+                return;
+            }
             showToast('Error triggering job', 'error');
             console.error(error);
         }

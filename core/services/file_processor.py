@@ -256,11 +256,15 @@ class FileProcessorService:
         required_cols = {"Data", "Ativo", "Quant", "PU", "SaldoBruto", "Caixa", "Moeda"}
         for path in file_paths:
             p = Path(path)
-            if p.suffix.lower() != ".csv":
+            ext = p.suffix.lower()
+            if ext not in {".csv", ".xlsx", ".xls", ".xlsm", ".xlsb"}:
                 continue
             try:
                 import pandas as pd
-                df = pd.read_csv(str(p), sep=None, engine="python")
+                if ext in {".xlsx", ".xls", ".xlsm", ".xlsb"}:
+                    df = pd.read_excel(str(p))
+                else:
+                    df = pd.read_csv(str(p), sep=None, engine="python")
                 # Normalize headers to avoid false negatives caused by UTF-8 BOM,
                 # trailing spaces, or accidental case drift in processor outputs.
                 def _norm_col(name: Any) -> str:
@@ -297,7 +301,7 @@ class FileProcessorService:
                     )
                 return None
             except Exception as exc:
-                return f"Failed to validate processed CSV output: {exc}"
+                return f"Failed to validate processed output: {exc}"
         return None
 
     @staticmethod
@@ -443,7 +447,7 @@ class FileProcessorService:
         renamed: List[str] = []
         for idx, old_path in enumerate(sorted(file_paths), start=1):
             path = Path(old_path)
-            ext = path.suffix or ".csv"
+            ext = path.suffix or ".xlsx"
             suffix = f"_{idx:02d}" if len(file_paths) > 1 else ""
             target = path.parent / f"positions_processado-{processing_stamp}{suffix}{ext}"
             collision = 1
@@ -1013,14 +1017,14 @@ class FileProcessorService:
                 "    try:",
                 "        df_input = _load_input_dataframe(arquivo, aba)",
                 "        resultado = process_auto_generated(arquivo, aba, carteira, df_input)",
-                "        if hasattr(resultado, 'to_csv'):",
+                "        if hasattr(resultado, 'to_excel'):",
                 "            if hasattr(resultado, 'columns') and 'Carteira' not in resultado.columns:",
                 "                resultado = resultado.copy()",
                 "                resultado['Carteira'] = carteira",
                 "            base_name = Path(arquivo).stem if arquivo else 'output'",
-                "            nome_saida = f'processed_{base_name}.csv'",
+                "            nome_saida = f'processed_{base_name}.xlsx'",
                 "            caminho_saida = Path(processed_dir) / nome_saida",
-                "            resultado.to_csv(caminho_saida, index=False, sep=';', decimal=',', encoding='utf-8-sig')",
+                "            resultado.to_excel(caminho_saida, index=False)",
                 "            print(f'Auto-saved: {caminho_saida}')",
                 "    except Exception as e:",
                 "        print(f'Error in auto-generated script: {e}', file=sys.stderr)",

@@ -24,7 +24,7 @@ def test_build_wrapped_script_low_code_mode_includes_auto_wrapper():
     assert "def process_auto_generated(arquivo, aba, carteira, df_input):" in wrapped
     assert "df_input = _load_input_dataframe(arquivo, aba)" in wrapped
     assert "resultado = process_auto_generated(arquivo, aba, carteira, df_input)" in wrapped
-    assert "resultado.to_csv(caminho_saida, index=False, sep=';', decimal=',', encoding='utf-8-sig')" in wrapped
+    assert "resultado.to_excel(caminho_saida, index=False)" in wrapped
     assert "# Aliases em portugues" in wrapped
     assert "arquivo = selected_filename" in wrapped
 
@@ -47,15 +47,15 @@ def test_build_wrapped_script_with_df_input_forces_low_code_even_with_imports():
 
 
 def test_normalize_processed_names_uses_positions_pattern(tmp_path):
-    source = tmp_path / "processed_any.csv"
-    source.write_text("a;b\n1;2\n", encoding="utf-8")
+    source = tmp_path / "processed_any.xlsx"
+    source.write_bytes(b"placeholder")
 
     renamed = FileProcessorService._normalize_processed_names([str(source)], job_name="ignored")
     assert len(renamed) == 1
 
     output_name = renamed[0].split("\\")[-1].split("/")[-1]
     assert output_name.startswith("positions_processado-")
-    assert output_name.endswith(".csv")
+    assert output_name.endswith(".xlsx")
 
 
 def test_check_runtime_dependencies_requires_pandas_for_low_code_when_missing():

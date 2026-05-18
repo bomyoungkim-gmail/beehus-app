@@ -56,9 +56,12 @@ services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
     restart: always
+    mem_limit: 512m
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+      # Disable fine-grained stats collection (default "fine" causes ~300% CPU spikes every 5s)
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit collect_statistics none"
     ports:
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"

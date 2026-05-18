@@ -29,6 +29,7 @@ CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 min timeout
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Prevent RabbitMQ from pushing all queued messages at once
 
 # Beanie (MongoDB ODM) - inicializado separadamente
 MONGO_URI = os.getenv('MONGO_URI')

@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 from uuid import uuid4
 import zipfile
 
@@ -547,7 +547,7 @@ def _snapshot_non_python_files(folder_path: Path) -> dict[str, tuple[int, int]]:
     return snapshot
 
 
-def _find_single_python_script(folder_path: Path, folder_name: str) -> Path:
+def _find_python_scripts(folder_path: Path, folder_name: str) -> list[Path]:
     scripts: list[Path] = []
     for candidate in folder_path.iterdir():
         if not candidate.is_file():
@@ -564,13 +564,8 @@ def _find_single_python_script(folder_path: Path, folder_name: str) -> Path:
             f"Pasta {folder_name} nao possui arquivo .py de processamento na raiz da pasta (subpastas sao ignoradas)."
         )
 
-    if len(scripts) > 1:
-        names = ", ".join(sorted(path.relative_to(folder_path).as_posix() for path in scripts))
-        raise AutomatedProcessingError(
-            f"Pasta {folder_name} possui mais de um arquivo .py na raiz ({names}). Deixe apenas um script .py na raiz da pasta."
-        )
-
-    return scripts[0]
+    scripts.sort(key=lambda path: path.name.lower())
+    return scripts
 
 
 def _copy_outputs(
@@ -578,16 +573,24 @@ def _copy_outputs(
     folder_path: Path,
     changed_files: list[str],
     outputs_root: Path,
+    script_name: str,
 ) -> list[str]:
     copied: list[str] = []
     output_folder = outputs_root / folder_name
+    script_stem = _sanitize_component(Path(script_name).stem)
 
     for relative_file in changed_files:
         source = folder_path / Path(relative_file)
         target = output_folder / Path(relative_file)
+        if target.exists():
+            relative_path = Path(relative_file)
+            renamed = (
+                f"{relative_path.stem}__{script_stem}{relative_path.suffix}"
+            )
+            target = output_folder / relative_path.parent / renamed
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        copied.append((Path(folder_name) / Path(relative_file)).as_posix())
+        copied.append(target.relative_to(outputs_root).as_posix())
 
     return copied
 
@@ -945,11 +948,11 @@ def _execute_folder_script(
     *,
     folder_name: str,
     folder_path: Path,
+    script_path: Path,
     outputs_root: Path,
     timeout_seconds: int,
     sandbox_mode: SandboxMode,
 ) -> FolderExecutionSummary:
-    script_path = _find_single_python_script(folder_path, folder_name)
     initial_snapshot = _snapshot_non_python_files(folder_path)
 
     if not initial_snapshot:
@@ -987,7 +990,13 @@ def _execute_folder_script(
         )
 
     changed_files.sort()
-    copied_outputs = _copy_outputs(folder_name, folder_path, changed_files, outputs_root)
+    copied_outputs = _copy_outputs(
+        folder_name,
+        folder_path,
+        changed_files,
+        outputs_root,
+        script_relative,
+    )
 
     return FolderExecutionSummary(
         folder_name=folder_name,
@@ -1005,6 +1014,9 @@ def _build_archive(
     outputs_root: Path,
     summaries: list[FolderExecutionSummary],
     folder_statuses: list[dict[str, str]],
+    script_statuses: list[dict[str, Any]],
+    processing_summary: dict[str, Any],
+    error_lines: list[str],
 ) -> None:
     with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
         for output_path in outputs_root.rglob("*"):
@@ -1027,8 +1039,12 @@ def _build_archive(
                 for summary in summaries
             ],
             "folder_statuses": folder_statuses,
+            "script_statuses": script_statuses,
+            "summary": processing_summary,
         }
         zip_file.writestr("processing_report.json", json.dumps(report, ensure_ascii=True, indent=2))
+        if error_lines:
+            zip_file.writestr("relatorio_erros.txt", "\n".join(error_lines) + "\n")
 
 
 def _process_materialized_folders(
@@ -1044,24 +1060,15 @@ def _process_materialized_folders(
     failures: list[dict[str, str]] = []
     summaries: list[FolderExecutionSummary] = []
     folder_statuses: list[dict[str, str]] = []
+    script_statuses: list[dict[str, Any]] = []
+    error_lines: list[str] = []
 
     for folder_name, folder_path in folders.items():
+        folder_script_errors: list[str] = []
+        folder_success_count = 0
+        folder_failure_count = 0
         try:
-            summary = _execute_folder_script(
-                folder_name=folder_name,
-                folder_path=folder_path,
-                outputs_root=outputs_root,
-                timeout_seconds=timeout_seconds,
-                sandbox_mode=sandbox_mode,
-            )
-            summaries.append(summary)
-            folder_statuses.append(
-                {
-                    "folder": folder_name,
-                    "status": "success",
-                    "error": "",
-                }
-            )
+            scripts = _find_python_scripts(folder_path, folder_name)
         except AutomatedProcessingError as exc:
             error_message = str(exc)
             status_item = {
@@ -1071,9 +1078,134 @@ def _process_materialized_folders(
             }
             failures.append(status_item)
             folder_statuses.append(status_item)
+            script_statuses.append(
+                {
+                    "folder_name": folder_name,
+                    "script_name": "",
+                    "status": "failed",
+                    "error": error_message,
+                    "started_at": "",
+                    "finished_at": "",
+                    "duration_ms": 0,
+                    "output_files": [],
+                }
+            )
+            error_lines.append(f"[{folder_name}] {error_message}")
+            continue
+
+        initial_folder_snapshot = _snapshot_non_python_files(folder_path)
+        if not initial_folder_snapshot:
+            error_message = f"Pasta {folder_name} nao possui arquivos de input para processar."
+            status_item = {
+                "folder": folder_name,
+                "status": "failed",
+                "error": error_message,
+            }
+            failures.append(status_item)
+            folder_statuses.append(status_item)
+            script_statuses.append(
+                {
+                    "folder_name": folder_name,
+                    "script_name": "",
+                    "status": "failed",
+                    "error": error_message,
+                    "started_at": "",
+                    "finished_at": "",
+                    "duration_ms": 0,
+                    "output_files": [],
+                }
+            )
+            error_lines.append(f"[{folder_name}] {error_message}")
+            continue
+
+        for script_path in scripts:
+            script_relative = script_path.relative_to(folder_path).as_posix()
+            started_at = datetime.now(timezone.utc)
+            try:
+                summary = _execute_folder_script(
+                    folder_name=folder_name,
+                    folder_path=folder_path,
+                    script_path=script_path,
+                    outputs_root=outputs_root,
+                    timeout_seconds=timeout_seconds,
+                    sandbox_mode=sandbox_mode,
+                )
+                summaries.append(summary)
+                finished_at = datetime.now(timezone.utc)
+                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                folder_success_count += 1
+                script_statuses.append(
+                    {
+                        "folder_name": folder_name,
+                        "script_name": script_relative,
+                        "status": "success",
+                        "error": "",
+                        "started_at": started_at.isoformat(),
+                        "finished_at": finished_at.isoformat(),
+                        "duration_ms": duration_ms,
+                        "output_files": summary.output_files,
+                    }
+                )
+            except AutomatedProcessingError as exc:
+                finished_at = datetime.now(timezone.utc)
+                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                error_message = str(exc)
+                folder_failure_count += 1
+                folder_script_errors.append(f"{script_relative}: {error_message}")
+                script_statuses.append(
+                    {
+                        "folder_name": folder_name,
+                        "script_name": script_relative,
+                        "status": "failed",
+                        "error": error_message,
+                        "started_at": started_at.isoformat(),
+                        "finished_at": finished_at.isoformat(),
+                        "duration_ms": duration_ms,
+                        "output_files": [],
+                    }
+                )
+                error_lines.append(f"[{folder_name}::{script_relative}] {error_message}")
+
+        if folder_failure_count == 0:
+            folder_statuses.append(
+                {
+                    "folder": folder_name,
+                    "status": "success",
+                    "error": "",
+                }
+            )
+            continue
+
+        if folder_success_count > 0:
+            error_message = (
+                f"{folder_failure_count} script(s) falharam na pasta {folder_name}, "
+                f"mas {folder_success_count} script(s) geraram saida."
+            )
+        else:
+            error_message = f"Todos os scripts da pasta {folder_name} falharam."
+        if folder_script_errors:
+            error_message = f"{error_message} Detalhes: {' | '.join(folder_script_errors)}"
+
+        status_item = {
+            "folder": folder_name,
+            "status": "failed",
+            "error": error_message,
+        }
+        failures.append(status_item)
+        folder_statuses.append(status_item)
 
     if failures and not summaries:
         raise AutomatedProcessingError("Falha ao processar uma ou mais pastas.", details=folder_statuses)
+
+    processing_summary = {
+        "total_folders": len(folders),
+        "folders_success": sum(1 for item in folder_statuses if item["status"] == "success"),
+        "folders_failed": sum(1 for item in folder_statuses if item["status"] != "success"),
+        "total_scripts": len(script_statuses),
+        "scripts_success": sum(1 for item in script_statuses if item["status"] == "success"),
+        "scripts_failed": sum(1 for item in script_statuses if item["status"] != "success"),
+        "total_outputs": sum(len(summary.output_files) for summary in summaries),
+    }
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     archive_path = working_dir / f"processamento_automatizado_{timestamp}.zip"
@@ -1082,6 +1214,9 @@ def _process_materialized_folders(
         outputs_root=outputs_root,
         summaries=summaries,
         folder_statuses=folder_statuses,
+        script_statuses=script_statuses,
+        processing_summary=processing_summary,
+        error_lines=error_lines,
     )
 
     return AutomatedProcessingResult(
@@ -1090,7 +1225,6 @@ def _process_materialized_folders(
         folders=summaries,
         folder_statuses=folder_statuses,
     )
-
 
 def run_folder_processing_batch(
     artifacts: Sequence[UploadedArtifact],

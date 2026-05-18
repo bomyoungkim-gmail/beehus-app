@@ -1,4 +1,5 @@
 from io import BytesIO
+import json
 from pathlib import Path
 import tempfile
 from zipfile import ZipFile
@@ -69,6 +70,84 @@ Path('resultado_processado.csv').write_text('coluna\\nok\\n', encoding='utf-8')
     report = archive.read("processing_report.json").decode("utf-8")
     assert '"folder": "teste_kim"' in report
     assert '"status": "success"' in report
+
+
+def test_processamento_automatizado_processa_multiplos_scripts_na_raiz():
+    client = _client()
+
+    script_a = """
+from pathlib import Path
+Path('saida_a.csv').write_text('coluna\\na\\n', encoding='utf-8')
+""".strip()
+    script_b = """
+from pathlib import Path
+Path('saida_b.csv').write_text('coluna\\nb\\n', encoding='utf-8')
+""".strip()
+
+    files = [
+        ("files", ("teste_kim/input.xlsx", b"conteudo", "application/octet-stream")),
+        ("files", ("teste_kim/01_primeiro.py", script_a.encode("utf-8"), "text/x-python")),
+        ("files", ("teste_kim/02_segundo.py", script_b.encode("utf-8"), "text/x-python")),
+    ]
+
+    response = client.post("/processamento-automatizado/process", files=files)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+
+    archive = ZipFile(BytesIO(response.content))
+    names = set(archive.namelist())
+    assert "processing_report.json" in names
+    assert "teste_kim/saida_a.csv" in names
+    assert "teste_kim/saida_b.csv" in names
+
+    report = json.loads(archive.read("processing_report.json").decode("utf-8"))
+    script_statuses = report["script_statuses"]
+    assert len(script_statuses) == 2
+    assert all(item["status"] == "success" for item in script_statuses)
+
+    folder_statuses = report["folder_statuses"]
+    assert folder_statuses[0]["folder"] == "teste_kim"
+    assert folder_statuses[0]["status"] == "success"
+
+
+def test_processamento_automatizado_falha_parcial_mantem_zip_e_relatorio_de_erros():
+    client = _client()
+
+    script_ok = """
+from pathlib import Path
+Path('saida_ok.csv').write_text('coluna\\nok\\n', encoding='utf-8')
+""".strip()
+    script_fail = "raise RuntimeError('falha controlada')"
+
+    files = [
+        ("files", ("teste_kim/input.xlsx", b"conteudo", "application/octet-stream")),
+        ("files", ("teste_kim/01_ok.py", script_ok.encode("utf-8"), "text/x-python")),
+        ("files", ("teste_kim/02_fail.py", script_fail.encode("utf-8"), "text/x-python")),
+    ]
+
+    response = client.post("/processamento-automatizado/process", files=files)
+
+    assert response.status_code == 200
+    archive = ZipFile(BytesIO(response.content))
+    names = set(archive.namelist())
+    assert "processing_report.json" in names
+    assert "relatorio_erros.txt" in names
+    assert "teste_kim/saida_ok.csv" in names
+
+    report = json.loads(archive.read("processing_report.json").decode("utf-8"))
+    folder_status = report["folder_statuses"][0]
+    assert folder_status["folder"] == "teste_kim"
+    assert folder_status["status"] == "failed"
+    assert "falharam" in folder_status["error"] or "falharam".upper() in folder_status["error"].upper()
+
+    script_statuses = report["script_statuses"]
+    assert len(script_statuses) == 2
+    assert any(item["status"] == "success" for item in script_statuses)
+    assert any(item["status"] == "failed" for item in script_statuses)
+
+    relatorio_erros = archive.read("relatorio_erros.txt").decode("utf-8")
+    assert "falha controlada" in relatorio_erros
 
 
 def test_processamento_automatizado_download_auto_retorna_arquivo_unico(monkeypatch):

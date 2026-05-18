@@ -56,6 +56,24 @@ type ProcessedFileRecord = {
   blob: Blob;
 };
 
+type ProcessingReportScriptStatus = {
+  folder_name: string;
+  script_name: string;
+  status: "success" | "failed";
+  error: string;
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+  output_files: string[];
+};
+
+type ProcessedFilesPayload = {
+  files: ProcessedFileRecord[];
+  folderStatuses: FolderExecutionStatus[];
+  scriptStatuses: ProcessingReportScriptStatus[];
+  archiveRecord: ProcessedFileRecord | null;
+};
+
 type WindowWithDirectoryPicker = Window & {
   showDirectoryPicker?: (options?: {
     mode?: "read" | "readwrite";
@@ -383,15 +401,64 @@ async function buildProcessedFileRecords(
   filename: string,
   contentType: string | undefined,
   fallbackFolder: string,
-): Promise<ProcessedFileRecord[]> {
+): Promise<ProcessedFilesPayload> {
   if (!isZipPayload(contentType, filename)) {
-    return [createSingleProcessedFileRecord(blob, filename, fallbackFolder)];
+    return {
+      files: [createSingleProcessedFileRecord(blob, filename, fallbackFolder)],
+      folderStatuses: [],
+      scriptStatuses: [],
+      archiveRecord: null,
+    };
   }
 
   try {
     const zip = await JSZip.loadAsync(blob);
     const files: ProcessedFileRecord[] = [];
+    let folderStatuses: FolderExecutionStatus[] = [];
+    let scriptStatuses: ProcessingReportScriptStatus[] = [];
     const sortedPaths = Object.keys(zip.files).sort();
+
+    const reportEntry = zip.files["processing_report.json"];
+    if (reportEntry && !reportEntry.dir) {
+      const reportText = await reportEntry.async("text");
+      const parsed = JSON.parse(reportText) as {
+        folder_statuses?: Array<{ folder?: string; status?: string; error?: string }>;
+        script_statuses?: Array<{
+          folder_name?: string;
+          script_name?: string;
+          status?: string;
+          error?: string;
+          started_at?: string;
+          finished_at?: string;
+          duration_ms?: number;
+          output_files?: string[];
+        }>;
+      };
+
+      if (Array.isArray(parsed.folder_statuses)) {
+        folderStatuses = parsed.folder_statuses.map((entry) => ({
+          folder: entry.folder || "pasta",
+          status: normalizeFolderStatus(entry.status),
+          error: entry.error || "",
+        }));
+      }
+
+      if (Array.isArray(parsed.script_statuses)) {
+        scriptStatuses = parsed.script_statuses.map((entry) => ({
+          folder_name: entry.folder_name || "pasta",
+          script_name: entry.script_name || "",
+          status: entry.status === "success" ? "success" : "failed",
+          error: entry.error || "",
+          started_at: entry.started_at || "",
+          finished_at: entry.finished_at || "",
+          duration_ms:
+            typeof entry.duration_ms === "number" ? entry.duration_ms : 0,
+          output_files: Array.isArray(entry.output_files)
+            ? entry.output_files
+            : [],
+        }));
+      }
+    }
 
     for (const zipPath of sortedPaths) {
       const entry = zip.files[zipPath];
@@ -414,13 +481,27 @@ async function buildProcessedFileRecords(
     }
 
     if (files.length > 0) {
-      return files;
+      return {
+        files,
+        folderStatuses,
+        scriptStatuses,
+        archiveRecord: createSingleProcessedFileRecord(
+          blob,
+          filename,
+          "__archive__",
+        ),
+      };
     }
   } catch {
     // Fallback para download unico quando o ZIP nao puder ser lido no cliente.
   }
 
-  return [createSingleProcessedFileRecord(blob, filename, fallbackFolder)];
+  return {
+    files: [createSingleProcessedFileRecord(blob, filename, fallbackFolder)],
+    folderStatuses: [],
+    scriptStatuses: [],
+    archiveRecord: null,
+  };
 }
 
 function fallbackFilenameFromContentType(
@@ -610,6 +691,11 @@ export default function ProcessamentoAutomatizado() {
   const [processedFiles, setProcessedFiles] = useState<ProcessedFileRecord[]>(
     [],
   );
+  const [archiveDownload, setArchiveDownload] =
+    useState<ProcessedFileRecord | null>(null);
+  const [scriptExecutionStatuses, setScriptExecutionStatuses] = useState<
+    ProcessingReportScriptStatus[]
+  >([]);
   const [rootSubfolderCounts, setRootSubfolderCounts] = useState<
     Record<string, number>
   >({});
@@ -680,8 +766,11 @@ export default function ProcessamentoAutomatizado() {
       for (const file of processedFiles) {
         URL.revokeObjectURL(file.url);
       }
+      if (archiveDownload) {
+        URL.revokeObjectURL(archiveDownload.url);
+      }
     };
-  }, [processedFiles]);
+  }, [archiveDownload, processedFiles]);
 
   const summary = useMemo(() => {
     const metrics = Object.values(preparedMetrics);
@@ -730,6 +819,8 @@ export default function ProcessamentoAutomatizado() {
     setLogs([]);
     setSandboxHealthMessage("");
     setProcessedFiles([]);
+    setArchiveDownload(null);
+    setScriptExecutionStatuses([]);
     setPreparedMetrics({});
   };
 
@@ -952,6 +1043,8 @@ export default function ProcessamentoAutomatizado() {
     setProcessing(true);
     setLogs([]);
     setProcessedFiles([]);
+    setArchiveDownload(null);
+    setScriptExecutionStatuses([]);
     const initialStatuses: FolderExecutionStatus[] = folders.map((folder) => ({
       folder: folder.id,
       status: "running",
@@ -1011,9 +1104,9 @@ export default function ProcessamentoAutomatizado() {
           entry.file.name.toLowerCase().endsWith(".py"),
         ).length;
         const inputCount = entries.length - scriptCount;
-        if (scriptCount !== 1) {
+        if (scriptCount < 1) {
           throw new Error(
-            `A pasta ${folder.displayName} precisa ter exatamente 1 arquivo .py na raiz da pasta (subpastas sao ignoradas).`,
+            `A pasta ${folder.displayName} precisa ter ao menos 1 arquivo .py na raiz da pasta (subpastas sao ignoradas).`,
           );
         }
         if (inputCount < 1) {
@@ -1054,7 +1147,7 @@ export default function ProcessamentoAutomatizado() {
           params: {
             timeout_seconds: PROCESS_TIMEOUT_SECONDS,
             sandbox_mode: SANDBOX_MODE,
-            download_mode: "auto",
+            download_mode: "zip",
           },
           responseType: "blob",
           timeout: 0,
@@ -1074,28 +1167,55 @@ export default function ProcessamentoAutomatizado() {
         );
 
       const fallbackFolder = folders[0]?.id || "saida";
-      const fileRecords = await buildProcessedFileRecords(
+      const processedPayload = await buildProcessedFileRecords(
         blob,
         filename,
         (response.headers["content-type"] as string | undefined) || blob.type,
         fallbackFolder,
       );
-      setProcessedFiles(fileRecords);
+      setProcessedFiles(processedPayload.files);
+      setArchiveDownload(processedPayload.archiveRecord);
+      setScriptExecutionStatuses(processedPayload.scriptStatuses);
 
-      setFolderExecutionStatuses((prev) =>
-        prev.map((item) => ({
-          ...item,
-          status: "success",
-          error: "",
-        })),
-      );
+      if (processedPayload.folderStatuses.length > 0) {
+        setFolderExecutionStatuses(processedPayload.folderStatuses);
+      } else {
+        setFolderExecutionStatuses((prev) =>
+          prev.map((item) => ({
+            ...item,
+            status: "success",
+            error: "",
+          })),
+        );
+      }
+
+      for (const scriptStatus of processedPayload.scriptStatuses) {
+        const durationSeconds = (scriptStatus.duration_ms / 1000).toFixed(2);
+        const suffix = scriptStatus.error ? ` - ${scriptStatus.error}` : "";
+        pushLog(
+          `Script ${scriptStatus.folder_name}/${scriptStatus.script_name}: ${scriptStatus.status} (${durationSeconds}s)${suffix}`,
+        );
+      }
+
+      const failedFolders = (
+        processedPayload.folderStatuses.length > 0
+          ? processedPayload.folderStatuses
+          : []
+      ).filter((item) => item.status !== "success").length;
       pushLog(
-        `Processamento concluido. Arquivos disponiveis para download no status por pasta (${fileRecords.length}).`,
+        `Processamento concluido. Arquivos disponiveis para download no status por pasta (${processedPayload.files.length}).`,
       );
-      showToast(
-        "Processamento concluido com sucesso. Use os links no status por pasta para baixar.",
-        "success",
-      );
+      if (failedFolders > 0) {
+        showToast(
+          `Processamento concluido com falhas parciais (${failedFolders} pasta(s) com erro). Verifique o status e os logs.`,
+          "error",
+        );
+      } else {
+        showToast(
+          "Processamento concluido com sucesso. Use os links no status por pasta para baixar.",
+          "success",
+        );
+      }
     } catch (error) {
       const parsed = await parseError(error);
       pushLog(`Erro: ${parsed.message}`);
@@ -1137,7 +1257,7 @@ export default function ProcessamentoAutomatizado() {
           </h2>
           <p className="text-slate-400">
             Cadastre uma ou mais pastas. Cada pasta precisa conter arquivos de
-            input e exatamente um script Python de processamento.
+            input e um ou mais scripts Python de processamento.
           </p>
         </header>
 
@@ -1279,6 +1399,20 @@ export default function ProcessamentoAutomatizado() {
             </span>
           </div>
 
+          {archiveDownload && (
+            <div className="rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDownloadFile(archiveDownload);
+                }}
+                className="text-[11px] px-2 py-1 rounded border border-blue-500/40 bg-blue-500/10 text-blue-200 hover:bg-blue-500/20"
+              >
+                Baixar ZIP do lote ({archiveDownload.filename})
+              </button>
+            </div>
+          )}
+
           {folderExecutionStatuses.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs uppercase text-slate-400">
@@ -1330,6 +1464,48 @@ export default function ProcessamentoAutomatizado() {
                             </button>
                           ))}
                         </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {scriptExecutionStatuses.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs uppercase text-slate-400">
+                Status por script
+              </p>
+              <div className="space-y-2">
+                {scriptExecutionStatuses.map((entry, idx) => {
+                  const statusClass =
+                    entry.status === "success"
+                      ? "border-green-500/40 bg-green-500/10 text-green-200"
+                      : "border-red-500/40 bg-red-500/10 text-red-200";
+                  const durationSeconds = (entry.duration_ms / 1000).toFixed(2);
+                  return (
+                    <div
+                      key={`${entry.folder_name}-${entry.script_name}-${idx}`}
+                      className="rounded-md border border-white/10 bg-slate-950/60 px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-slate-300">
+                          {entry.folder_name}/{entry.script_name || "script"}
+                        </span>
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-full border ${statusClass}`}
+                        >
+                          {entry.status}
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {durationSeconds}s
+                        </span>
+                      </div>
+                      {entry.error && (
+                        <p className="text-xs text-slate-400 mt-1">
+                          {entry.error}
+                        </p>
                       )}
                     </div>
                   );

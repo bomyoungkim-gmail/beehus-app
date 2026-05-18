@@ -46,3 +46,7 @@ plano/
 .pytest_tmp_old/
 .pytest_tmp/
 dbmongo/
+.pytest_tmp_run/
+.pytest_tmp_run2/
+.tmp/
+test-results/

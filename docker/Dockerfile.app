@@ -1,6 +1,6 @@
-FROM docker:27.5.1-cli AS docker-cli
+FROM public.ecr.aws/docker/library/docker:27.5.1-cli AS docker-cli
 
-FROM python:3.11-slim
+FROM public.ecr.aws/docker/library/python:3.11-slim
 
 WORKDIR /app
 

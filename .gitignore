@@ -45,3 +45,4 @@ docker-compose.yml.dev
 plano/
 .pytest_tmp_old/
 .pytest_tmp/
+dbmongo/

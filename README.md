@@ -47,6 +47,31 @@ npm install
 npm run dev
 ```
 
+### Local Backend Tests (Windows / `.venv`)
+
+Use this when you want to run `pytest` locally without Docker and avoid dependency drift.
+
+```powershell
+# from repo root
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
+Run tests with project import path:
+
+```powershell
+$env:PYTHONPATH='.'
+.venv\Scripts\python.exe -m pytest -q
+```
+
+Focused suite (automated processing endpoints):
+
+```powershell
+$env:PYTHONPATH='.'
+.venv\Scripts\python.exe -m pytest -q tests/test_processamento_automatizado_endpoints.py
+```
+
 ---
 
 ## 🔌 Services & Architecture

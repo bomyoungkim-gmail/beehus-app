@@ -1,0 +1,8 @@
+# Dev/test dependencies for local reproducible test runs.
+# Install after requirements.txt inside a project virtualenv.
+
+pytest==9.0.3
+python-multipart==0.0.27
+
+# Keep TestClient compatibility with FastAPI 0.104.1 + Starlette 0.27.0.
+httpx==0.24.1

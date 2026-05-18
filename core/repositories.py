@@ -4,19 +4,12 @@ Replaces SQLAlchemy/raw SQL implementation.
 """
 
 import os
-import json
 import logging
-import redis.asyncio as redis
 from core.models.mongo_models import Run
 from core.utils.date_utils import get_now
-from core.config import settings
+from core.services.run_state import run_state
 
 logger = logging.getLogger(__name__)
-
-def _get_redis_client() -> redis.Redis:
-    """Return a fresh Redis client per call — avoids reusing a pool bound to a closed event loop."""
-    return redis.from_url(settings.REDIS_URL, decode_responses=False)
-
 
 class RunRepository:
     """Repository for managing Run documents and raw data"""
@@ -36,53 +29,14 @@ class RunRepository:
             status: New status (queued, running, success, failed)
             error: Optional error message
         """
-        execution_node = os.getenv("HOSTNAME", "worker")
-        update_dict = {
-            "status": status,
-            "execution_node": execution_node,
-            "updated_at": get_now(),
-        }
-        
-        if error is not None:
-            update_dict["error_summary"] = error
-            
-        if status == "running":
-            update_dict["started_at"] = get_now()
-        elif status in ["success", "failed"]:
-            update_dict["finished_at"] = get_now()
-        
         try:
-            # Explicitly force string ID just in case
-            query_id = str(run_id) 
-            
-            result = await Run.get_motor_collection().update_one(
-                {"_id": query_id},
-                {"$set": update_dict}
+            updated = await run_state.save_run_status(
+                str(run_id),
+                status,
+                error=error,
             )
-
-            if result.matched_count == 0:
-                logger.error(
-                    "[CRITICAL] Run %s not matched in DB for status update. Check _id type.",
-                    run_id,
-                )
-            
-            if result.matched_count > 0:
-                # Publish to Redis for WebSockets using shared connection pool
-                try:
-                    redis_client = _get_redis_client()
-                    message = {
-                        "run_id": run_id,
-                        "status": status,
-                        "node": execution_node,
-                        "timestamp": get_now().isoformat()
-                    }
-                    await redis_client.publish("run_updates", json.dumps(message))
-                except Exception as redis_error:
-                    # Don't fail the job if Redis publishing fails
-                    logger.error(f"Redis publish failed: {redis_error}")
-            else:
+            if not updated:
                 logger.error(f"Run {run_id} not found for status update")
-                    
         except Exception as e:
             logger.error(f"Error updating run {run_id[:8]}: {e}")
 

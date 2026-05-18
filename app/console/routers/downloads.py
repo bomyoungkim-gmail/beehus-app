@@ -6,16 +6,14 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
-import csv
 import logging
-import os
 
 from core.models.mongo_models import Job, Run
 from core.services.excel_introspection import is_excel_filename, list_sheet_names
 from core.services.file_processor import FileProcessorService
-from core.utils.date_utils import get_now
+from core.services.run_artifacts import run_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -83,94 +81,31 @@ class ReprocessFromProcessedRequest(BaseModel):
 
 
 def _artifacts_dir() -> Path:
-    return Path(os.getenv("ARTIFACTS_DIR", "/app/artifacts"))
+    return run_artifacts.artifacts_dir()
 
 
 def _file_meta_to_dict(file_meta: Any) -> Dict[str, Any]:
-    if hasattr(file_meta, "model_dump"):
-        return file_meta.model_dump()
-    if hasattr(file_meta, "dict"):
-        return getattr(file_meta, "dict")()
-    if isinstance(file_meta, dict):
-        return file_meta
-    raise ValueError("Unsupported run file metadata format")
+    return run_artifacts.file_meta_to_dict(file_meta)
 
 
 def _resolve_artifact_path(relative_path: str) -> Path:
-    root = _artifacts_dir().resolve()
-    candidate = (root / relative_path).resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid artifact path")
-    return candidate
+    return run_artifacts.resolve_artifact_path(relative_path)
 
 
 def _original_files(run: Run) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for file_meta in run.files or []:
-        candidate = _file_meta_to_dict(file_meta)
-        if candidate.get("file_type") == "original":
-            out.append(candidate)
-    return out
+    return run_artifacts.original_files(run)
 
 
 def _existing_files_only(files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    filtered: List[Dict[str, Any]] = []
-    for file_meta in files:
-        rel = file_meta.get("path")
-        if not rel:
-            filtered.append(file_meta)
-            continue
-        try:
-            path = _resolve_artifact_path(rel)
-            if path.exists() and path.is_file():
-                filtered.append(file_meta)
-        except Exception:
-            continue
-    return filtered
+    return run_artifacts.existing_files_only(files)
 
 
 def _to_iso8601_utc(value: datetime) -> str:
-    """
-    Return a timezone-aware ISO-8601 UTC string.
-    Handles legacy naive datetimes by assuming they are UTC.
-    """
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    else:
-        value = value.astimezone(timezone.utc)
-    return value.isoformat()
+    return run_artifacts.to_iso8601_utc(value)
 
 
 def _read_columns_from_file(file_path: Path, filename: str, selected_sheet: Optional[str]) -> List[str]:
-    try:
-        import pandas as pd
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="Pandas is required to inspect file columns") from exc
-
-    if is_excel_filename(filename):
-        sheet_name = selected_sheet if selected_sheet else 0
-        df = pd.read_excel(str(file_path), sheet_name=sheet_name, nrows=0)
-        return [str(c).strip() for c in list(df.columns)]
-
-    sniff_text = ""
-    try:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
-            sniff_text = handle.read(2048)
-    except Exception:
-        sniff_text = ""
-
-    delimiters = [",", ";", "\t", "|"]
-    sep = ","
-    if sniff_text:
-        try:
-            sep = csv.Sniffer().sniff(sniff_text, delimiters=delimiters).delimiter
-        except Exception:
-            sep = ";"
-
-    df = pd.read_csv(str(file_path), sep=sep, nrows=0, dtype=str, encoding="utf-8")
-    return [str(c).strip() for c in list(df.columns)]
+    return run_artifacts.read_columns_from_file(file_path, filename, selected_sheet)
 
 
 @router.get("/", response_model=List[DownloadItem])
@@ -401,91 +336,20 @@ async def select_file_for_processing(run_id: str, payload: SelectFileRequest):
     if not job:
         raise HTTPException(status_code=400, detail="Run has no linked job")
 
-    originals = _original_files(run)
-    selected = next((f for f in originals if f.get("filename") == payload.filename), None)
-    if not selected:
-        raise HTTPException(status_code=404, detail="Selected file not found in run originals")
-
     if is_excel_filename(payload.filename):
         sheet_options = await get_excel_options(run_id, payload.filename)
-        current_aliases = list(getattr(job, "sheet_aliases", []) or [])
-
-        def _merge_aliases(values: List[str]) -> List[str]:
-            merged = list(current_aliases)
-            for v in values:
-                value = (v or "").strip()
-                if value and value.lower() not in [m.lower() for m in merged]:
-                    merged.append(value)
-            return merged
-
-        if len(sheet_options) == 1:
-            await job.update(
-                {
-                    "$set": {
-                        "last_selected_filename": payload.filename,
-                        "last_selected_sheet": sheet_options[0],
-                        "sheet_aliases": _merge_aliases([sheet_options[0]]),
-                        "selection_updated_at": get_now(),
-                    }
-                }
-            )
-            await run.update(
-                {
-                    "$set": {
-                        "processing_status": "pending_reprocess",
-                        "selected_filename": payload.filename,
-                        "selected_sheet": sheet_options[0],
-                        "processing_error": None,
-                    }
-                }
-            )
-            return {
-                "status": "pending_reprocess",
-                "selected_filename": payload.filename,
-                "selected_sheet": sheet_options[0],
-            }
-        await job.update(
-            {
-                "$set": {
-                    "last_selected_filename": payload.filename,
-                    "last_selected_sheet": None,
-                    "sheet_aliases": _merge_aliases(sheet_options),
-                    "selection_updated_at": get_now(),
-                }
-            }
+        return await run_artifacts.select_file_for_processing(
+            run=run,
+            job=job,
+            filename=payload.filename,
+            sheet_options=sheet_options,
         )
-        await run.update(
-            {
-                "$set": {
-                    "processing_status": "pending_sheet_selection",
-                    "selected_filename": payload.filename,
-                    "selected_sheet": None,
-                    "processing_error": None,
-                }
-            }
-        )
-        return {"status": "pending_sheet_selection", "selected_filename": payload.filename, "sheet_options": sheet_options}
 
-    await job.update(
-        {
-            "$set": {
-                "last_selected_filename": payload.filename,
-                "last_selected_sheet": None,
-                "selection_updated_at": get_now(),
-            }
-        }
+    return await run_artifacts.select_file_for_processing(
+        run=run,
+        job=job,
+        filename=payload.filename,
     )
-    await run.update(
-        {
-            "$set": {
-                "processing_status": "pending_reprocess",
-                "selected_filename": payload.filename,
-                "selected_sheet": None,
-                "processing_error": None,
-            }
-        }
-    )
-    return {"status": "pending_reprocess", "selected_filename": payload.filename}
 
 
 @router.post("/{run_id}/processing/select-sheet")
@@ -498,37 +362,12 @@ async def select_sheet_for_processing(run_id: str, payload: SelectSheetRequest):
     if not job:
         raise HTTPException(status_code=400, detail="Run has no linked job")
 
-    current_aliases = list(getattr(job, "sheet_aliases", []) or [])
-    merged_aliases = list(current_aliases)
-    if payload.selected_sheet and payload.selected_sheet.lower() not in [m.lower() for m in merged_aliases]:
-        merged_aliases.append(payload.selected_sheet)
-
-    await job.update(
-        {
-            "$set": {
-                "last_selected_filename": payload.filename,
-                "last_selected_sheet": payload.selected_sheet,
-                "sheet_aliases": merged_aliases,
-                "selection_updated_at": get_now(),
-            }
-        }
+    return await run_artifacts.select_sheet_for_processing(
+        run=run,
+        job=job,
+        filename=payload.filename,
+        selected_sheet=payload.selected_sheet,
     )
-
-    await run.update(
-        {
-            "$set": {
-                "processing_status": "pending_reprocess",
-                "selected_filename": payload.filename,
-                "selected_sheet": payload.selected_sheet,
-                "processing_error": None,
-            }
-        }
-    )
-    return {
-        "status": "pending_reprocess",
-        "selected_filename": payload.filename,
-        "selected_sheet": payload.selected_sheet,
-    }
 
 
 @router.post("/{run_id}/processing/process")
@@ -545,38 +384,14 @@ async def reprocess_run(run_id: str, payload: ReprocessRequest):
     if not job:
         raise HTTPException(status_code=400, detail="Run has no linked job")
 
-    originals = _original_files(run)
-    names = [f.get("filename") for f in originals if f.get("filename")]
-    if not names:
-        raise HTTPException(status_code=400, detail="Run has no original files to process")
-
-    filename = payload.filename or getattr(run, "selected_filename", None) or job.last_selected_filename
-    if not filename:
-        if len(names) == 1:
-            filename = names[0]
-        else:
-            await run.update({"$set": {"processing_status": "pending_file_selection", "processing_error": None}})
-            return {"status": "pending_file_selection"}
-
-    if filename not in names:
-        raise HTTPException(status_code=400, detail=f"File '{filename}' not found among run originals")
-
-    selected_sheet = payload.selected_sheet or getattr(run, "selected_sheet", None) or job.last_selected_sheet
-    state = await FileProcessorService.process_with_user_selection(
+    return await run_artifacts.process_with_selection(
         run_id=run_id,
-        filename=filename,
-        selected_sheet=selected_sheet,
+        run=run,
+        job=job,
+        filename=payload.filename,
+        selected_sheet=payload.selected_sheet,
+        file_processor_service=FileProcessorService,
     )
-    if state == "failed":
-        run = await Run.get(run_id)
-        detail = run.processing_error if run else "Processing failed"
-        raise HTTPException(status_code=400, detail=detail)
-
-    return {
-        "status": state,
-        "selected_filename": filename,
-        "selected_sheet": selected_sheet,
-    }
 
 
 @router.post("/{run_id}/processing/reprocess-from-processed")
@@ -592,64 +407,12 @@ async def reprocess_from_processed(run_id: str, payload: ReprocessFromProcessedR
     if not job:
         raise HTTPException(status_code=400, detail="Run has no linked job")
 
-    processed_candidates = [
-        _file_meta_to_dict(f)
-        for f in (run.files or [])
-        if _file_meta_to_dict(f).get("file_type") == "processed"
-    ]
-    source_processed = next(
-        (f for f in processed_candidates if f.get("filename") == payload.processed_filename),
-        None,
-    )
-    if not source_processed:
-        raise HTTPException(status_code=404, detail="Processed file not found in run")
-
-    script_snapshot = source_processed.get("processor_script_snapshot")
-    if not script_snapshot:
-        raise HTTPException(
-            status_code=400,
-            detail="Processed file does not contain script snapshot for reprocessing.",
-        )
-
-    originals = _original_files(run)
-    names = [f.get("filename") for f in originals if f.get("filename")]
-    if not names:
-        raise HTTPException(status_code=400, detail="Run has no original files to process")
-
-    filename = payload.filename or getattr(run, "selected_filename", None) or job.last_selected_filename
-    if not filename:
-        if len(names) == 1:
-            filename = names[0]
-        else:
-            await run.update({"$set": {"processing_status": "pending_file_selection", "processing_error": None}})
-            return {"status": "pending_file_selection"}
-    if filename not in names:
-        raise HTTPException(status_code=400, detail=f"File '{filename}' not found among run originals")
-
-    selected_sheet = payload.selected_sheet or getattr(run, "selected_sheet", None) or job.last_selected_sheet
-    snapshot_meta = {
-        "processor_id": source_processed.get("processor_id"),
-        "processor_version": source_processed.get("processor_version"),
-        "processor_name": source_processed.get("processor_name"),
-        "processor_script_snapshot": script_snapshot,
-        "processor_source": "snapshot",
-    }
-    state = await FileProcessorService.process_with_user_selection(
+    return await run_artifacts.process_from_snapshot(
         run_id=run_id,
-        filename=filename,
-        selected_sheet=selected_sheet,
-        script_override=script_snapshot,
-        processor_snapshot_override=snapshot_meta,
+        run=run,
+        job=job,
+        processed_filename=payload.processed_filename,
+        filename=payload.filename,
+        selected_sheet=payload.selected_sheet,
+        file_processor_service=FileProcessorService,
     )
-    if state == "failed":
-        run = await Run.get(run_id)
-        detail = run.processing_error if run else "Processing failed"
-        raise HTTPException(status_code=400, detail=detail)
-
-    return {
-        "status": state,
-        "selected_filename": filename,
-        "selected_sheet": selected_sheet,
-        "source_processed_filename": payload.processed_filename,
-        "processor_source": "snapshot",
-    }

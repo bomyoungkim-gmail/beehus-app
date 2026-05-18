@@ -5,7 +5,6 @@ Replaces the custom aio_pika worker implementation.
 
 from celery import Task
 from django_config import celery_app
-from core.worker.executor import SeleniumExecutor
 from core.connectors.registry import ConnectorRegistry
 from core.repositories import repo
 from core.models.mongo_models import Job, Run, Credential, OtpAudit
@@ -13,12 +12,22 @@ from core.db import init_db
 from core.security import decrypt_value
 from core.config import settings
 import os
-import shutil
 import asyncio
 import logging
+import importlib
+import unicodedata
+import socket
+import hashlib
+import inspect
+import pkgutil
+from pathlib import Path
 from datetime import datetime
 import re
 from core.utils.date_utils import get_now
+from core.services.run_state import run_state
+from core.services.run_execution import run_execution
+import core.connectors
+from core.connectors.base import BaseConnector
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +40,172 @@ SELENIUM_MAX_SLOTS = max(
     settings.SELENIUM_MAX_SLOTS,
     settings.SELENIUM_NODE_COUNT * settings.SELENIUM_NODE_MAX_SESSIONS,
 )
+_BUILD_FINGERPRINT_CACHE: str | None = None
+
+
+def _resolve_connector_with_reload(connector_name: str):
+    """
+    Resolve connector and recover from stale/partial registry state in long-lived workers.
+    """
+    def _resolve_by_direct_module_scan(name: str):
+        """
+        Last-resort connector resolution bypassing registry static state.
+        Scans conn_* modules, instantiates subclasses and matches by .name.
+        """
+        discovered_modules: list[str] = []
+        for module_info in pkgutil.iter_modules(core.connectors.__path__):
+            module_name = module_info.name
+            if not module_name.startswith("conn_"):
+                continue
+            fq_module = f"core.connectors.{module_name}"
+            discovered_modules.append(fq_module)
+            try:
+                module = importlib.import_module(fq_module)
+            except Exception:
+                continue
+
+            for _, obj in inspect.getmembers(module, inspect.isclass):
+                if not issubclass(obj, BaseConnector) or obj is BaseConnector:
+                    continue
+                if obj.__module__ != module.__name__:
+                    continue
+                try:
+                    instance = obj()
+                except Exception:
+                    continue
+                if getattr(instance, "name", None) == name:
+                    try:
+                        ConnectorRegistry.register(obj)
+                    except Exception:
+                        pass
+                    return instance, discovered_modules
+        return None, discovered_modules
+
+    try:
+        return ConnectorRegistry.get_connector(connector_name), False
+    except ValueError:
+        # Force re-import of registry module so connector registrations run again.
+        registry_module = importlib.import_module("core.connectors.registry")
+        reloaded_module = importlib.reload(registry_module)
+        reloaded_registry = getattr(reloaded_module, "ConnectorRegistry", ConnectorRegistry)
+        try:
+            return reloaded_registry.get_connector(connector_name), True
+        except ValueError:
+            connector, discovered_modules = _resolve_by_direct_module_scan(connector_name)
+            if connector:
+                return connector, True
+            raise ValueError(
+                f"Connector '{connector_name}' not found after reload+scan. "
+                f"Scanned modules: {discovered_modules}"
+            )
+
+
+def _diagnose_connector_lookup(connector_name: str) -> dict:
+    """Best-effort diagnostics for connector lookup failures."""
+    diagnostics: dict = {
+        "connector_name": connector_name,
+        "registry_keys": sorted(getattr(ConnectorRegistry, "_registry", {}).keys()),
+        "module_candidates": [],
+    }
+    base = connector_name
+    if base.endswith("_login"):
+        base = base[: -len("_login")]
+    candidates = [
+        f"core.connectors.conn_{connector_name}",
+        f"core.connectors.conn_{base}",
+    ]
+
+    seen = set()
+    for module_name in candidates:
+        if module_name in seen:
+            continue
+        seen.add(module_name)
+        entry = {"module": module_name}
+        try:
+            module = importlib.import_module(module_name)
+            entry["import"] = "ok"
+            discovered = []
+            for _, obj in inspect.getmembers(module, inspect.isclass):
+                if not issubclass(obj, BaseConnector) or obj is BaseConnector:
+                    continue
+                if obj.__module__ != module.__name__:
+                    continue
+                item = {"class": obj.__name__}
+                try:
+                    instance = obj()
+                    item["name"] = getattr(instance, "name", None)
+                except Exception as class_exc:
+                    item["init_error"] = f"{type(class_exc).__name__}: {class_exc}"
+                discovered.append(item)
+            entry["connector_classes"] = discovered
+        except Exception as import_exc:
+            entry["import"] = "error"
+            entry["error"] = f"{type(import_exc).__name__}: {import_exc}"
+        diagnostics["module_candidates"].append(entry)
+    return diagnostics
+
+
+def _normalize_connector_name(raw_name: str | None) -> str:
+    """
+    Normalize connector names received from persisted jobs/queue payloads.
+    Handles hidden unicode formatting chars and surrounding spaces.
+    """
+    if raw_name is None:
+        return ""
+    name = str(raw_name)
+    name = "".join(ch for ch in name if unicodedata.category(ch) != "Cf")
+    return name.strip()
+
+
+def _hash_files(paths: list[str]) -> str:
+    digest = hashlib.sha256()
+    for file_path in paths:
+        try:
+            data = Path(file_path).read_bytes()
+        except Exception:
+            continue
+        digest.update(file_path.encode("utf-8", errors="ignore"))
+        digest.update(data)
+    return digest.hexdigest()[:12]
+
+
+def _build_fingerprint() -> str:
+    """
+    Build fingerprint to identify exactly which runtime processed the run.
+    Priority:
+      1) explicit BUILD_FINGERPRINT / GIT_SHA envs
+      2) fallback deterministic hash from core worker files
+    """
+    global _BUILD_FINGERPRINT_CACHE
+    if _BUILD_FINGERPRINT_CACHE:
+        return _BUILD_FINGERPRINT_CACHE
+
+    explicit_fp = (
+        os.getenv("BUILD_FINGERPRINT")
+        or os.getenv("GIT_SHA")
+        or os.getenv("GIT_COMMIT")
+        or os.getenv("COMMIT_SHA")
+    )
+    if explicit_fp:
+        source = "env"
+        fp = explicit_fp.strip()
+    else:
+        source = "hash"
+        fp = _hash_files(
+            [
+                "/app/core/tasks.py",
+                "/app/core/connectors/registry.py",
+                "/app/core/connectors/conn_morgan_stanley.py",
+            ]
+        )
+
+    host = os.getenv("HOSTNAME") or socket.gethostname()
+    image_tag = os.getenv("IMAGE_TAG") or os.getenv("APP_IMAGE_TAG") or "-"
+    compose_project = os.getenv("COMPOSE_PROJECT_NAME") or "-"
+    _BUILD_FINGERPRINT_CACHE = (
+        f"source={source} fp={fp} host={host} image={image_tag} compose={compose_project}"
+    )
+    return _BUILD_FINGERPRINT_CACHE
 
 
 def _resolve_credential_password(credential: Credential, execution_params: dict) -> tuple[str | None, str]:
@@ -238,12 +413,12 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
     """
     async def _async_scrape():
         """Async implementation of the scraping task."""
+        nonlocal connector_name
         await init_db()
         job = None
         run_download_dir = None
-        download_exclude_paths: set[str] = set()
-        download_scan_start_ts: float | None = None
-        download_exclude_signatures: dict[str, tuple[int, int, str]] = {}
+        raw_connector_name = connector_name
+        connector_name = _normalize_connector_name(connector_name)
 
         try:
             # Get run document
@@ -363,7 +538,13 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                         logger.error(f"Heartbeat error: {e}")
 
             # Update run status to running
-            await repo.save_run_status(run_id, "running")
+            await run_state.save_run_status(run_id, "running")
+            await log(f"🧬 Build fingerprint: {_build_fingerprint()}")
+            if raw_connector_name != connector_name:
+                await log(
+                    "⚠️ Normalized connector name from "
+                    f"{raw_connector_name!r} to {connector_name!r}"
+                )
             await log(f"🔄 Starting scrape: run_id={run_id}, connector={connector_name}")
             
             # Start heartbeat
@@ -371,71 +552,63 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
 
             # Get connector
             try:
-                connector = ConnectorRegistry.get_connector(connector_name)
+                connector, recovered_with_reload = _resolve_connector_with_reload(connector_name)
+                if recovered_with_reload:
+                    await log(
+                        f"⚠️ Connector registry reloaded during lookup and recovered connector '{connector_name}'"
+                    )
             except ValueError as e:
                 msg = f"Connector '{connector_name}' not found"
+                diagnostics = _diagnose_connector_lookup(connector_name)
+                await log(f"DEBUG Connector lookup exception: {e}")
+                await log(
+                    "DEBUG Available connectors in worker: "
+                    f"{diagnostics.get('registry_keys', [])}"
+                )
+                await log(
+                    "DEBUG Connector module diagnostics: "
+                    f"{diagnostics.get('module_candidates', [])}"
+                )
                 await log(f"❌ {msg}")
-                await repo.save_run_status(run_id, "failed", msg)
+                await run_state.save_run_status(run_id, "failed", error=msg)
                 heartbeat_task.cancel()
                 return {"success": False, "error": str(e)}
             
             # Execute scraping with Selenium
             # HYBRID ARCHITECTURE:
-            # - If JP Morgan: use local worker NoVNC endpoint (host port 17901 by default)
-            # - Else: use remote Selenium Grid nodes (host ports 17902/17903 by default)
-            use_local = "jpmorgan" in connector_name.lower()
+            # - JP Morgan: local worker NoVNC endpoint (UC/evasion)
+            # - Morgan Stanley: optional local UC/evasion via env flag
+            # - Others: remote Selenium Grid nodes (host ports 17902/17903 by default)
+            execution_plan = run_execution.build_plan(connector_name)
+            await log(
+                "DEBUG Selenium execution mode: "
+                f"{execution_plan.mode_label} "
+                f"(connector={connector_name})"
+            )
             
             slot_token = None
-            if not use_local:
+            if not execution_plan.use_local:
                 slot_token = await _acquire_selenium_slot(run_id)
                 if not slot_token:
                     msg = "No Selenium slot available within timeout"
                     await log(f"❌ {msg}")
-                    await repo.save_run_status(run_id, "failed", msg)
+                    await run_state.save_run_status(run_id, "failed", error=msg)
                     heartbeat_task.cancel()
                     return {"success": False, "error": msg}
 
-            download_root = "/downloads"
-            run_download_dir = os.path.join(download_root, run_id)
-            os.makedirs(run_download_dir, exist_ok=True)
             try:
-                # Shared folder may be created by root in worker while browser runs as seluser.
-                # Keep it writable to avoid Chrome fallback to profile downloads and Save As flows.
-                os.chmod(run_download_dir, 0o777)
-            except Exception as chmod_error:
-                logger.warning("Could not chmod run download dir %s: %s", run_download_dir, chmod_error)
-            # Use run start timestamp so overwritten files with same name are still captured.
-            download_scan_start_ts = get_now().timestamp()
-            try:
-                # Snapshot files that already existed before this run starts.
-                preexisting_run_files = set()
-                if os.path.isdir(run_download_dir):
-                    for name in os.listdir(run_download_dir):
-                        candidate = os.path.join(run_download_dir, name)
-                        if os.path.isfile(candidate):
-                            preexisting_run_files.add(os.path.abspath(candidate))
-
-                preexisting_root_files = set()
-                if os.path.isdir(download_root):
-                    for name in os.listdir(download_root):
-                        candidate = os.path.join(download_root, name)
-                        if os.path.isfile(candidate):
-                            preexisting_root_files.add(os.path.abspath(candidate))
-
-                download_exclude_paths = preexisting_run_files | preexisting_root_files
-                from core.services.file_manager import FileManager
-                download_exclude_signatures = FileManager.build_file_signatures(
-                    download_exclude_paths
-                )
+                download_context = run_execution.prepare_download_context(run_id)
+                run_download_dir = download_context.run_download_dir
             except Exception as snapshot_error:
                 logger.warning("Failed to snapshot preexisting downloads: %s", snapshot_error)
+                download_context = run_execution.prepare_download_context(run_id)
+                run_download_dir = download_context.run_download_dir
             await log(f"Session download dir: {run_download_dir}")
 
             # Strong isolation: each run gets its own browser download directory.
             chrome_download_dir = run_download_dir
             
-            executor = SeleniumExecutor(use_local=use_local, download_dir=chrome_download_dir)
-            executor.start()
+            executor = run_execution.start_executor(execution_plan, chrome_download_dir)
             await log(f"🔌 Connected to Selenium Grid: {executor.driver.session_id}")
             await log(
                 "📺 VNC mapping:"
@@ -464,7 +637,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
 
                 # Save results
                 if result.success:
-                    await repo.save_run_status(run_id, "success")
+                    await run_state.save_run_status(run_id, "success")
                     if result.data:
                         await repo.save_raw_payload(
                             run_id,
@@ -474,103 +647,25 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
 
                     await log("✅ Scrape successful")
                 else:
-                    await repo.save_run_status(run_id, "failed", result.error)
+                    await run_state.save_run_status(run_id, "failed", error=result.error)
                     await log(f"❌ Scrape failed: {result.error}")
 
                 await log("Checking for downloaded files...")
                 try:
-                    from core.services.file_manager import FileManager
-                    from core.services.excel_introspection import is_excel_filename, list_sheet_names
-
-                    original_paths = FileManager.capture_downloads(
-                        run_id,
-                        pattern="*",
-                        timeout_seconds=30,
-                        source_dir=run_download_dir,
-                        exclude_paths=download_exclude_paths,
-                        min_modified_time=download_scan_start_ts,
-                        preexisting_signatures=download_exclude_signatures,
+                    files_captured = await run_execution.capture_download_artifacts(
+                        run_id=run_id,
+                        run=run,
+                        connector_name=connector_name,
+                        execution_params=execution_params,
+                        context=download_context,
+                        to_ddmmyyyy=lambda value, prefer_month_first: _to_ddmmyyyy(
+                            value,
+                            prefer_month_first=prefer_month_first,
+                        ),
+                        is_history_file=_is_history_file,
+                        log=log,
                     )
-
-                    if original_paths:
-                        refreshed_run = await Run.get(run_id)
-                        prefer_month_first_dates = connector_name in {"btg_us_login", "btg_cayman_login"}
-
-                        report_date_ddmmyyyy = _to_ddmmyyyy(
-                            (refreshed_run.report_date if refreshed_run else None)
-                            or execution_params.get("holdings_date")
-                            or execution_params.get("report_date"),
-                            prefer_month_first=prefer_month_first_dates,
-                        )
-                        history_date_ddmmyyyy = _to_ddmmyyyy(
-                            (refreshed_run.history_date if refreshed_run else None)
-                            or execution_params.get("history_date"),
-                            prefer_month_first=prefer_month_first_dates,
-                        )
-                        default_date_ddmmyyyy = report_date_ddmmyyyy or history_date_ddmmyyyy or datetime.now().strftime("%d%m%Y")
-
-                        files_metadata = []
-                        for original_path in original_paths:
-                            current_name = os.path.basename(original_path)
-                            if _is_history_file(current_name):
-                                selected_date = history_date_ddmmyyyy or default_date_ddmmyyyy
-                            else:
-                                selected_date = report_date_ddmmyyyy or default_date_ddmmyyyy
-
-                            renamed_original = (
-                                FileManager.append_date_suffix(
-                                    original_path,
-                                    selected_date,
-                                )
-                                or original_path
-                            )
-
-                            files_metadata.append(
-                                {
-                                    "file_type": "original",
-                                    "filename": os.path.basename(renamed_original),
-                                    "path": FileManager.to_artifact_relative(renamed_original),
-                                    "size_bytes": FileManager.get_file_size(renamed_original),
-                                    "status": "ready",
-                                    "is_excel": is_excel_filename(os.path.basename(renamed_original)),
-                                    "sheet_options": (
-                                        list_sheet_names(renamed_original)
-                                        if is_excel_filename(os.path.basename(renamed_original))
-                                        else []
-                                    ),
-                                    "is_latest": False,
-                                }
-                            )
-
-                        if files_metadata:
-                            await run.update({"$set": {"files": files_metadata}})
-                            await log(f"Files captured: {len(files_metadata)} original file(s)")
-                    else:
-                        no_files_downloaded = True
-                        try:
-                            run_dir_entries = []
-                            if os.path.isdir(run_download_dir):
-                                run_dir_entries = sorted(os.listdir(run_download_dir))
-                            root_dir_entries = []
-                            if os.path.isdir(download_root):
-                                root_dir_entries = sorted(os.listdir(download_root))
-
-                            run_dir_preview = run_dir_entries[:50]
-                            root_dir_preview = root_dir_entries[:50]
-                            run_dir_suffix = " ..." if len(run_dir_entries) > 50 else ""
-                            root_dir_suffix = " ..." if len(root_dir_entries) > 50 else ""
-
-                            await log(
-                                "DEBUG download dir snapshot "
-                                f"run_dir={run_download_dir} entries={run_dir_preview}{run_dir_suffix}"
-                            )
-                            await log(
-                                "DEBUG download root snapshot "
-                                f"root_dir={download_root} entries={root_dir_preview}{root_dir_suffix}"
-                            )
-                        except Exception as debug_list_error:
-                            await log(f"DEBUG download snapshot error: {debug_list_error}")
-                        await log("No files downloaded")
+                    no_files_downloaded = not files_captured
 
                 except Exception as file_error:
                     await log(f"File capture error: {file_error}")
@@ -600,7 +695,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                         "Connector flow ended without downloaded files; "
                         "treating run as failed to avoid false success."
                     )
-                    await repo.save_run_status(run_id, "failed", no_file_msg)
+                    await run_state.save_run_status(run_id, "failed", error=no_file_msg)
                     await log(f"❌ {no_file_msg}")
                     if isinstance(result_payload, dict):
                         result_payload["success"] = False
@@ -613,17 +708,13 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 except asyncio.CancelledError:
                     pass
                 
-                executor.stop()
-                if slot_token:
-                    await _release_selenium_slot(slot_token)
-                await log("Selenium session ended")
-
-                if run_download_dir and os.path.isdir(run_download_dir):
-                    try:
-                        shutil.rmtree(run_download_dir, ignore_errors=True)
-                        logger.info("Removed run download dir: %s", run_download_dir)
-                    except Exception as cleanup_error:
-                        logger.warning("Could not remove run download dir %s: %s", run_download_dir, cleanup_error)
+                await run_execution.close_execution(
+                    executor=executor,
+                    slot_token=slot_token,
+                    run_download_dir=run_download_dir,
+                    release_slot=_release_selenium_slot,
+                    log=log,
+                )
 
             # -------------------------------------------------------------------------
             # Post-Processing (Selenium Released)
@@ -665,7 +756,7 @@ def scrape_task(self, job_id: str, run_id: str, workspace_id: str, connector_nam
                 
         except Exception as e:
             logger.exception(f"❌ Scrape task exception: {e}")
-            await repo.save_run_status(run_id, "failed", str(e))
+            await run_state.save_run_status(run_id, "failed", error=str(e), force=True)
             raise
     
     return asyncio.run(_async_scrape())
@@ -691,11 +782,11 @@ def cleanup_stale_runs(self):
         
         for run in zombies:
             logger.warning(f"🧟 Found zombie run {run.id}. Marking failed.")
-            run.status = "failed"
-            run.error_summary = "Zombie execution detected (Heartbeat lost)"
-            run.logs.append(f"[{get_now().time()}] 💀 System: Marked as zombie (no heartbeat > 5m)")
-            run.finished_at = get_now()
-            await run.save()
+            await run_state.mark_failed_with_log(
+                run,
+                reason="Zombie execution detected (Heartbeat lost)",
+                log_message="💀 System: Marked as zombie (no heartbeat > 5m)",
+            )
             
         # 2. Handle Stuck Queued Jobs
         queue_cutoff = get_now() - timedelta(hours=1)
@@ -706,11 +797,11 @@ def cleanup_stale_runs(self):
         
         for run in stuck_queued:
             logger.warning(f"⏳ Found stuck queued run {run.id}. Marking failed.")
-            run.status = "failed"
-            run.error_summary = "Stuck in queue > 1h"
-            run.logs.append(f"[{get_now().time()}] 💀 System: Timeout in queue")
-            run.finished_at = get_now()
-            await run.save()
+            await run_state.mark_failed_with_log(
+                run,
+                reason="Stuck in queue > 1h",
+                log_message="💀 System: Timeout in queue",
+            )
             
         return f"Cleaned {len(zombies)} zombies and {len(stuck_queued)} stuck runs"
     

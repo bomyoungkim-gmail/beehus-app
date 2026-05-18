@@ -3,11 +3,15 @@ Jobs Router - API endpoints for job management and triggering runs.
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+import unicodedata
+import os
+import socket
+from fastapi import APIRouter, HTTPException, Request
 from typing import List, Optional
 
 from core.models.mongo_models import Job, Run, Credential
 from core.tasks import scrape_task
+from core.connectors.registry import ConnectorRegistry
 from django_config import celery_app  # noqa: F401 – used by retry_run
 from app.console.schemas import (
     JobCreate,
@@ -22,10 +26,42 @@ from core.services.visual_processing import (
     extract_visual_config_from_script,
 )
 from core.utils.date_utils import get_now
+from core.services.run_state import run_state
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["jobs"])
+
+
+def _normalize_connector_name(raw_name: Optional[str]) -> str:
+    """Normalize connector names to prevent hidden-char and whitespace mismatches."""
+    if raw_name is None:
+        return ""
+    name = str(raw_name)
+    name = "".join(ch for ch in name if unicodedata.category(ch) != "Cf")
+    return name.strip()
+
+
+def _validate_connector_or_400(connector_name: str) -> None:
+    """Validate connector exists in registry before scheduling a run."""
+    try:
+        ConnectorRegistry.get_connector(connector_name)
+    except ValueError as exc:
+        available = sorted(getattr(ConnectorRegistry, "_registry", {}).keys())
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": str(exc),
+                "connector": connector_name,
+                "available_connectors": available,
+            },
+        ) from exc
+
+
+def _runtime_identity() -> str:
+    host = os.getenv("HOSTNAME") or socket.gethostname()
+    mongo_db = os.getenv("MONGO_DB_NAME", "-")
+    return f"api_host={host} mongo_db={mongo_db}"
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +84,11 @@ async def preview_processing_script(payload: ProcessingScriptPreviewRequest):
 @router.post("/jobs", response_model=JobResponse)
 async def create_job(job_in: JobCreate):
     """Create a new scraping job."""
+    normalized_connector = _normalize_connector_name(job_in.connector)
+    if not normalized_connector:
+        raise HTTPException(status_code=400, detail="Connector is required")
+    _validate_connector_or_400(normalized_connector)
+
     if job_in.credential_id:
         credential = await Credential.get(job_in.credential_id)
         if not credential:
@@ -69,6 +110,7 @@ async def create_job(job_in: JobCreate):
             )
 
     job_payload = job_in.model_dump()
+    job_payload["connector"] = normalized_connector
     processing_config = job_payload.get("processing_config_json")
     if processing_config is not None:
         generated_script, normalized_config = _normalize_processing_config(processing_config)
@@ -174,7 +216,7 @@ async def delete_all_jobs(workspace_id: Optional[str] = None):
 # ---------------------------------------------------------------------------
 
 @router.post("/jobs/{job_id}/run", response_model=RunResponse)
-async def trigger_run(job_id: str):
+async def trigger_run(job_id: str, request: Request):
     """Trigger a job run. Creates a Run document and dispatches to Celery worker."""
     job = await Job.get(job_id)
     if not job:
@@ -182,15 +224,55 @@ async def trigger_run(job_id: str):
     if job.status != "active":
         raise HTTPException(status_code=400, detail="Job is not active")
 
-    run = Run(job_id=job.id, job_name=job.name, connector=job.connector, status="queued")
+    connector_name = _normalize_connector_name(job.connector)
+    if not connector_name:
+        raise HTTPException(status_code=400, detail="Job connector is empty")
+    _validate_connector_or_400(connector_name)
+    if connector_name != (job.connector or ""):
+        original_connector = job.connector
+        job.connector = connector_name
+        await job.save()
+        logger.info("Normalized connector for job %s from %r to %r", job.id, original_connector, connector_name)
+
+    client_trace_id = (
+        request.headers.get("X-Beehus-Client-Trace")
+        or request.headers.get("X-Request-ID")
+        or "-"
+    )
+    client_time = request.headers.get("X-Beehus-Client-Time") or "-"
+
+    run = Run(job_id=job.id, job_name=job.name, connector=connector_name, status="queued")
+    run.logs.append(
+        f"[{get_now().time()}] 🧭 Trigger accepted: client_trace_id={client_trace_id} "
+        f"client_time={client_time} connector={connector_name} {_runtime_identity()}"
+    )
     await run.save()
+    persisted_run = await Run.get(str(run.id))
+    if not persisted_run:
+        logger.error(
+            "Run registration failed before enqueue: run_id=%s job_id=%s connector=%s host=%s mongo_db=%s",
+            run.id,
+            job.id,
+            connector_name,
+            os.getenv("HOSTNAME", "-"),
+            os.getenv("MONGO_DB_NAME", "-"),
+        )
+        raise HTTPException(status_code=500, detail="Failed to register run before enqueue")
+    logger.info(
+        "Run registered: run_id=%s job_id=%s connector=%s host=%s mongo_db=%s",
+        run.id,
+        job.id,
+        connector_name,
+        os.getenv("HOSTNAME", "-"),
+        os.getenv("MONGO_DB_NAME", "-"),
+    )
 
     execution_params = _build_execution_params(job)
     task = scrape_task.delay(
         job_id=job.id,
         run_id=str(run.id),
         workspace_id=job.workspace_id,
-        connector_name=job.connector,
+        connector_name=connector_name,
         params=execution_params,
     )
     run.celery_task_id = task.id
@@ -210,10 +292,10 @@ async def retry_run(job_id: str, run_id: str):
         raise HTTPException(status_code=404, detail="Run not found for this job")
 
     run.attempt += 1
-    run.status = "queued"
     run.error_summary = None
     run.started_at = None
     run.finished_at = None
+    run.updated_at = get_now()
     run.processing_status = "not_required"
     run.selected_filename = None
     run.selected_sheet = None
@@ -224,16 +306,53 @@ async def retry_run(job_id: str, run_id: str):
         run.job_name = job.name
     await run.save()
 
+    connector_name = _normalize_connector_name(job.connector)
+    if not connector_name:
+        raise HTTPException(status_code=400, detail="Job connector is empty")
+    _validate_connector_or_400(connector_name)
+    if connector_name != (job.connector or ""):
+        original_connector = job.connector
+        job.connector = connector_name
+        await job.save()
+        logger.info("Normalized connector for job %s from %r to %r", job.id, original_connector, connector_name)
+    run_connector_normalized = _normalize_connector_name(run.connector)
+    if run_connector_normalized and run_connector_normalized != (run.connector or ""):
+        original_run_connector = run.connector
+        run.connector = run_connector_normalized
+        await run.save()
+        logger.info("Normalized connector for run %s from %r to %r", run.id, original_run_connector, run_connector_normalized)
+
     execution_params = _build_execution_params(job)
     task = scrape_task.delay(
         job_id=job.id,
         run_id=str(run.id),
         workspace_id=job.workspace_id,
-        connector_name=job.connector,
+        connector_name=connector_name,
         params=execution_params,
     )
     run.celery_task_id = task.id
     await run.save()
+    await run_state.save_run_status(str(run.id), "queued", force=True)
+    persisted_run = await Run.get(str(run.id))
+    if not persisted_run:
+        logger.error(
+            "Run registration lost after retry enqueue: run_id=%s job_id=%s connector=%s host=%s mongo_db=%s",
+            run.id,
+            job.id,
+            connector_name,
+            os.getenv("HOSTNAME", "-"),
+            os.getenv("MONGO_DB_NAME", "-"),
+        )
+        raise HTTPException(status_code=500, detail="Run missing after retry enqueue")
+    logger.info(
+        "Run retry re-queued: run_id=%s job_id=%s connector=%s task_id=%s host=%s mongo_db=%s",
+        run.id,
+        job.id,
+        connector_name,
+        run.celery_task_id,
+        os.getenv("HOSTNAME", "-"),
+        os.getenv("MONGO_DB_NAME", "-"),
+    )
     return run
 
 

@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator, Field, ConfigDict
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+import unicodedata
 from core.schemas.enums import JobStatus, RunStatus
 
 class JobCreate(BaseModel):
@@ -34,6 +35,16 @@ class JobCreate(BaseModel):
         if isinstance(value, str):
             normalized = value.strip()
             return normalized or None
+        return value
+
+    @field_validator("connector", mode="before")
+    @classmethod
+    def normalize_connector(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            cleaned = "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
+            return cleaned.strip()
         return value
 
 class JobResponse(JobCreate):
